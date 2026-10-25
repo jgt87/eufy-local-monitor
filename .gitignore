@@ -32,3 +32,6 @@ dist/
 
 # Stale debug capture
 local-app/test/screenshots/debug.png
+
+# Local-only agent pointer (the repo must not name AI assistants)
+CLAUDE.md

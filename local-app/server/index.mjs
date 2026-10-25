@@ -6,11 +6,13 @@ import { randomBytes } from 'node:crypto';
 import { EufyAccount } from './eufy.mjs';
 import { MediaSession,checkFfmpeg,validateRtsp } from './media.mjs';
 import { createDiagnostics } from './diagnostics.mjs';
+import { EventLog } from './events.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-export async function createAppServer({account:injectedAccount,mediaFactory=options=>new MediaSession(options),ffmpegAvailable,diagnostics=createDiagnostics(root)}={}) {
+export async function createAppServer({account:injectedAccount,mediaFactory=options=>new MediaSession(options),ffmpegAvailable,diagnostics=createDiagnostics(root),eventLog}={}) {
   const token=randomBytes(32).toString('hex');const logs=[];let session=null;const diag=diagnostics;
   const log=message=>{logs.unshift({time:new Date().toISOString(),message});logs.splice(50);diag.log('app',message);};
-  const account=injectedAccount || new EufyAccount({onChange:log,diag});
+  const account=injectedAccount || new EufyAccount({onChange:log,diag,events:eventLog || new EventLog(path.join(root,'.runtime','events'))});
+  const events=account.events || eventLog || new EventLog(path.join(root,'.runtime','events'));
   const ffmpeg=ffmpegAvailable ?? await checkFfmpeg();const sdk=await account.available();
   // APK evidence is optional: the capability file is vendor data that is regenerated locally, not shipped.
   const optionalJson=async file=>{try{return JSON.parse(await readFile(path.join(root,'..',file),'utf8'));}catch{return null;}};
@@ -28,7 +30,13 @@ export async function createAppServer({account:injectedAccount,mediaFactory=opti
     const url=new URL(req.url,'http://127.0.0.1');
     if(req.method==='POST' && req.headers['x-monitor-token']!==token){send(res,403,{error:'Refresh the page before trying again.'});return;}
     try {
-      if(req.method==='GET' && url.pathname==='/api/state'){send(res,200,{token,account:account.snapshot(),tools:{ffmpeg,sdk,diagnostics:diag.enabled?path.basename(diag.file):null},stream:session?.info() || null,logs});return;}
+      if(req.method==='GET' && url.pathname==='/api/state'){send(res,200,{token,account:account.snapshot(),tools:{ffmpeg,sdk,diagnostics:diag.enabled?path.basename(diag.file):null},stream:session?.info() || null,logs,latestEvent:events.latest(),eventCount:events.events.length});return;}
+      if(req.method==='GET' && url.pathname==='/api/events'){await events.ready;send(res,200,{events:events.list()});return;}
+      const pic=req.method==='GET' && url.pathname.match(/^\/api\/events\/([0-9a-z-]+)\.jpg$/);
+      if(pic){const data=await events.image(pic[1]);if(!data){send(res,404,{error:'Picture not found.'});return;}res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=86400'});res.end(data);return;}
+      if(req.method==='POST' && url.pathname==='/api/events/clear'){await events.clear();log('Event history cleared.');send(res,200,{ok:true});return;}
+      if(req.method==='POST' && url.pathname==='/api/settings'){const b=await body(req);try{send(res,200,await account.settings(String(b.sn || '')));}catch(e){diag.log('settings','read failed',e);send(res,400,{error:/^Select a device/.test(e.message)?e.message:'Could not read this device’s settings.'});}return;}
+      if(req.method==='POST' && url.pathname==='/api/picture'){const b=await body(req);let jpeg;try{jpeg=await account.latestPicture(String(b.sn || ''));}catch(e){send(res,400,{error:/^Select a device/.test(e.message)?e.message:'Could not read the stored picture.'});return;}if(!jpeg){send(res,404,{error:'No stored picture is available for this device yet.'});return;}send(res,200,{image:`data:image/jpeg;base64,${jpeg.toString('base64')}`});return;}
       if(req.method==='GET' && url.pathname==='/api/evidence'){send(res,200,{commands:commands.filter(c=>c.module==='RN_ANDROID_zx-rnsdk'),capabilities,apkVersion:'6.1.10_30612'});return;}
       if(req.method==='POST' && url.pathname==='/api/login'){
         const b=await body(req);try{await account.login({email:String(b.email || '').trim(),password:String(b.password || ''),countryCode:String(b.countryCode || 'NL').trim().toUpperCase()});}catch(e){const safe=/^(The Eufy SDK is missing|Enter your email|A sign-in|Sign out before|Eufy rejected|Eufy sign-in failed|Signed in successfully)/.test(e.message);send(res,400,{error:safe?e.message:'Eufy sign-in failed. Check your credentials and region, then sign out before retrying.'});return;}send(res,200,account.snapshot());return;

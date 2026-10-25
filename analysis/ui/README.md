@@ -15,11 +15,16 @@ Start it with `Start UI Atlas.cmd` in the project root, or run `node analysis/ui
 | Fonts | MontForAnker Regular/SemiBold/Bold/Heavy | `assets/fonts` in the asset pack |
 | Native Android screens | 4,273 layout XML files rendered in the browser, 3,800+ drawables (vector → SVG, shape → CSS), day/night colours | Decoded base APK resources (`analysis/decoded`) |
 
-Smoke test result (all bundles, light and dark): 962 of 974 screens and modals render without exceptions. The 12 without a tree are files whose component is created by a factory the evaluator does not follow.
+Smoke test result (all bundles, light and dark): all 963 screens and modals render without exceptions. Plain `.ts` files (view models named `*ViewModal.ts`, the `BCRNDialog.ts` native wrapper) and `use*` hooks count as logic, not screens, and re-export files such as `PresentPositionsScreen.tsx` preview the screen they re-export (`alias` in the catalogue).
+
+## Screen map and T8214 variants
+
+- **Screen map** (`#/map`, `#/map/<bundle>`, `#/map/<bundle>/<index>`): which files open which screens, from the catalogue's `navigates` field. A link is a screen name in the file's strings, or a route name from the bundle's route registry (`NavigationConfig` route tables, `<Stack.Screen name component>` elements) when the file imports `NavigationKeys` or the name ends in Screen/Page. The registries themselves are left out. The per-screen page draws callers and targets as a graph; nodes open their own graph.
+- **T8214 variants** (`#/t8214`, a "T8214" tag and a "T8214 only" filter in the bundle lists): files that reference the T8214 doorbell model (`isT8214` checks, `'T8214'` literals, T8214 text keys), or import a view model or hook of the same feature that calls `isT8214`. For these checks only, `rn-tree.mjs` follows the conditional jump: elements built between the check and its target are tagged `$c: ["T8214"]` (or `["!T8214"]` for the else side). Elements of a branch that the straight-line evaluation overwrote before the return are kept per component as `branches`. The screen page marks branch elements, filters them with the model selector (all, T8214, other models) and lists the branch trees in the tree selector.
 
 ## Reading the previews
 
-- Control flow is not followed. Every conditional branch appears at once; loops render one sample. Use the "Returned tree" selector when a component has several `return` paths.
+- Control flow is not followed, except for T8214 model checks (see above). Every conditional branch appears at once; loops render one sample. Use the "Returned tree" selector when a component has several `return` paths.
 - Runtime data is absent: device names, events, list contents. Values from props/state render as `{name}`. Lists render once per static data entry, or three template rows (the 2nd and 3rd dimmed) when the data is built at runtime.
 - Dashed boxes are components that could not be resolved, mostly native views such as `BCRNP2PImageView` (live frames), `Video`, maps and `highlightText`.
 - Dimension tokens are recovered: `UFSpace` (4, 6, 8, 12, 16, 18, 20, 24, 30), `UFRadius` (2 … 25), `UFFont` sizes (8 … 24), and the OneAnker `oa.padding` / `oa.gap` (0 … 24), `oa.radius` (with aliases such as `btn` = pill and `dialog` = 24) and `oa.line`. Each scale class has fixed/relative and ratio variants; the previews use fixed, which comes from the first class in each factory. For `oa.font`, the `standard` brand table is shown, because the app picks the brand at runtime.
@@ -53,8 +58,10 @@ Tests use the Playwright copy in `local-app/node_modules` with installed Edge:
 ```
 set PLAYWRIGHT_MODULE_URL=file:///C:/Files/Apps/EufySecurity/local-app/node_modules/playwright/index.mjs
 node analysis/ui/atlas/test/smoke.mjs
-node analysis/ui/atlas/test/shots.mjs <out-dir> "#/b/SEC_SETTING/190" "#/tokens"
+node analysis/ui/atlas/test/shots.mjs <out-dir> "#/b/SEC_SETTING/190" "#/tokens" "#/map" "#/t8214"
 ```
+
+The smoke test also renders every file with a T8214 reference in both model variants and each separated branch tree.
 
 From Git Bash, set `MSYS_NO_PATHCONV=1` first, otherwise `#/...` routes are rewritten as Windows paths.
 

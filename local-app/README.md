@@ -10,6 +10,12 @@ The launcher installs missing dependencies and builds the interface. The server 
 
 Sign in with your Eufy email, password and two-letter country code. Complete any captcha or verification code manually. Select a discovered camera and start live view. Streams stop after five minutes. Use **Other ways to test → Run test signal** to check local playback before signing in.
 
+## Events and settings
+
+While you are signed in, the monitor records rings and detections (doorbell press, motion, person, pet, vehicle, package and sound) from the SDK's realtime push. Each one appears in the activity list and as a banner, and is kept on the **Events** page with the picture the camera sent, which is fetched a few seconds after the event. History is stored only on this PC, in `.runtime/events/` (the 200 most recent events). Records name the device by its display name and a short hash, never its serial. Events are only collected while the monitor runs; the eufy app keeps its own history. **Latest picture** shows the most recent picture the camera sent with an event; it is not a fresh capture.
+
+The **Settings** page shows what the selected device last reported to the eufy cloud, grouped like the app's settings screens: power, detection, doorbell and sound, notifications, video and network. It is read only and never writes to the device. Battery devices report some values only when they wake. Key material, serials and MAC addresses are left out.
+
 ## Limits and credentials
 
 Real device support depends on the community `@mega-yfue/eufy-sdk` client and must be checked with the actual doorbell. Successful test-pattern playback verifies the local conversion and browser pipeline only. APK model declarations do not prove a device exposes RTSP. Audio and talkback are not implemented.

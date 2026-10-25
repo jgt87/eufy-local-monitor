@@ -74,3 +74,6 @@
 .show-gone .nv-gone { display: flex !important; outline: 1px dotted #888; opacity: .6; }
 .xml { max-height: 70vh; }
 .rn-svg { flex-shrink: 0; overflow: visible; }
+/* Elements recovered inside a device-model branch (isT8214 and similar checks). */
+.rn-branch { outline: 1px dotted rgba(127,127,127,.9); outline-offset: -1px; }
+.rn-branch::after { content: attr(data-branch); position: absolute; top: 0; right: 0; z-index: 2; font: 9px/1.4 Consolas, monospace; color: #fff; background: rgba(40,40,40,.78); padding: 0 4px; border-radius: 0 0 0 4px; pointer-events: none; }

@@ -54,6 +54,23 @@ function prop(base, name) {
 }
 function lastName(v) { return v && v.k === 'get' ? v.name : v && v.k === 'lit' ? v.v : null; }
 
+// ---- device-model branches ----
+// Checks on the owner's doorbell model are followed through conditional jumps: elements created
+// between the jump and its target sit in one branch, the range skipped by a trailing Jmp in the other.
+// Recognised: isT8214(...) / x.isT8214, x === 'T8214…', x.startsWith('T8214…'), and their negation.
+// The label is the model ('T8214', 'T8214*' for a prefix test), prefixed with '!' for the else side.
+const MODEL_RE = /^T8214\w*$/;
+function modelCond(v) {
+  if (!v) return null;
+  if (v.k === 'cond') return v;
+  const n = lastName(v.k === 'call' ? v.callee : v);
+  if ((v.k === 'call' || v.k === 'get') && typeof n === 'string' && /^isT8214\w*$/.test(n)) return { k: 'cond', model: n.slice(2), neg: false };
+  if (v.k === 'call' && n === 'startsWith' && isLit(v.args[0]) && MODEL_RE.test(v.args[0].v)) return { k: 'cond', model: `${v.args[0].v}*`, neg: false };
+  return null;
+}
+const litModel = (x, y) => [x, y].find(v => isLit(v) && typeof v.v === 'string' && MODEL_RE.test(v.v))?.v;
+const condLabel = (model, holds) => (holds ? model : `!${model}`);
+
 // ---- per-function evaluation ----
 const fnModule = new Map();
 const results = new Map(); // fid -> { rets: [] }
@@ -67,7 +84,24 @@ function evalFunction(fid, capturedEnv, factoryCtx, isFactory) {
   const queue = [];
   let ownEnv = null;
   const since = new Set(); // registers written since the last call: outgoing argument slots
-  for (const ins of h.instructions(fid)) {
+  const insts = [...h.instructions(fid)], indexAt = new Map(insts.map((x, i) => [x.at, i]));
+  const branches = []; // { from, to, label } instruction ranges inside a model branch
+  const tagged = []; // elements created inside one
+  // Records the fall-through range of a forward conditional jump and, when it ends in a forward Jmp, the else range.
+  const branch = (ins, label) => {
+    const to = ins.at + ins.args[0], next = insts[indexAt.get(ins.at) + 1];
+    if (ins.args[0] <= 0 || !next) return;
+    branches.push({ from: next.at, to, label });
+    const prev = insts[indexAt.get(to) - 1];
+    if (prev && /^Jmp(Long)?$/.test(prev.op) && prev.args[0] > 0) branches.push({ from: to, to: prev.at + prev.args[0], label: label.startsWith('!') ? label.slice(1) : `!${label}` });
+  };
+  const tagBranch = (v, at) => {
+    if (v.k !== 'el') return v;
+    const labels = branches.filter(r => r.from <= at && at < r.to).map(r => r.label);
+    if (labels.length) { v.cond = [...new Set(labels)]; tagged.push(v); }
+    return v;
+  };
+  for (const ins of insts) {
     const a = ins.args, op = ins.op;
     if (/^(Call|Construct)/.test(op)) { /* handled below, then cleared */ }
     else if (a.length && !/^(J|Put|Store|Throw|Ret|Debugger|Profile|Unreachable|Switch|Check|Declare)/.test(op)) since.add(a[0]);
@@ -131,15 +165,33 @@ function evalFunction(fid, capturedEnv, factoryCtx, isFactory) {
         queue.push([ins.fn, env]);
         break;
       }
+      case 'Not': { const c = modelCond(get(a[1])); regs[a[0]] = c ? { ...c, neg: !c.neg } : U; break; }
+      case 'StrictEq': case 'Eq': case 'StrictNeq': case 'Neq': {
+        const model = litModel(get(a[1]), get(a[2]));
+        regs[a[0]] = model ? { k: 'cond', model, neg: /Neq/.test(op) } : U;
+        break;
+      }
+      case 'JmpTrue': case 'JmpTrueLong': case 'JmpFalse': case 'JmpFalseLong': {
+        // JmpFalse falls through when the condition holds.
+        const c = modelCond(get(a[1]));
+        if (c) branch(ins, condLabel(c.model, op.startsWith('JmpFalse') !== c.neg));
+        break;
+      }
+      case 'JStrictEqual': case 'JStrictEqualLong': case 'JEqual': case 'JEqualLong':
+      case 'JStrictNotEqual': case 'JStrictNotEqualLong': case 'JNotEqual': case 'JNotEqualLong': {
+        const model = litModel(get(a[1]), get(a[2]));
+        if (model) branch(ins, condLabel(model, /Not/.test(op)));
+        break;
+      }
       case 'Call1': case 'Call2': case 'Call3': case 'Call4':
-        regs[a[0]] = call(get(a[1]), a.slice(3).map(get), factoryCtx);
+        regs[a[0]] = tagBranch(call(get(a[1]), a.slice(3).map(get), factoryCtx), ins.at);
         since.clear();
         break;
       case 'Call': case 'CallLong': case 'Construct': case 'ConstructLong': {
         // Outgoing arguments sit at the top of the frame: this at frameSize-1, then arg1, arg2...
         const top = since.size ? Math.max(...since) : h.headers[fid].frameSize - 1, args = [];
         for (let i = 1; i < a[2]; i++) args.push(get(top - i));
-        regs[a[0]] = call(get(a[1]), args, factoryCtx);
+        regs[a[0]] = tagBranch(call(get(a[1]), args, factoryCtx), ins.at);
         since.clear();
         break;
       }
@@ -149,7 +201,7 @@ function evalFunction(fid, capturedEnv, factoryCtx, isFactory) {
         if (ins.args.length && !/^(J|Put|Store|Throw|Ret|Debugger|Async|Profile|Unreachable|Switch|Del|Catch|SaveGenerator|StartGenerator|ResumeGenerator|CompleteGenerator|Check|Declare)/.test(op)) regs[a[0]] = U;
     }
   }
-  results.set(fid, { rets });
+  results.set(fid, { rets, tagged });
   return queue;
 }
 
@@ -208,7 +260,7 @@ function ser(v, depth = 0, seen = new Set()) {
       seen.delete(v);
       return r;
     }
-    case 'el': return { $e: ser(v.type, depth + 1, seen), $props: ser(v.props, depth + 1, seen) };
+    case 'el': return { $e: ser(v.type, depth + 1, seen), $props: ser(v.props, depth + 1, seen), $c: v.cond };
     case 'fn': return { $f: v.fid };
     case 'call': {
       // Calls to local helpers (theme builders): inline the object the helper returns.
@@ -226,6 +278,27 @@ function ser(v, depth = 0, seen = new Set()) {
   }
 }
 const hasEl = v => v && (v.k === 'el' || (v.k === 'call' && v.args.some(hasEl)));
+// Symbolic values reachable from v (element props, object fields, array items, call arguments).
+function reach(v, out, depth = 0) {
+  if (!v || depth > 40 || out.has(v)) return out;
+  out.add(v);
+  if (v.k === 'el') reach(v.props, out, depth + 1);
+  else if (v.k === 'obj') for (const x of Object.values(v.props)) reach(x, out, depth + 1);
+  else if (v.k === 'arr') for (const x of v.items) reach(x, out, depth + 1);
+  else if (v.k === 'call') for (const x of v.args) reach(x, out, depth + 1);
+  return out;
+}
+// Model-branch elements that straight-line evaluation overwrote before the return (if/else chains
+// that merge into one register): keep the outermost ones as separate trees.
+function lostBranches(r) {
+  if (!r.tagged?.length) return undefined;
+  const kept = new Set();
+  for (const x of r.rets) reach(x, kept);
+  const inner = new Set();
+  for (const t of r.tagged) for (const x of reach(t.props, new Set())) inner.add(x);
+  const roots = r.tagged.filter(t => !kept.has(t) && !inner.has(t));
+  return roots.length ? roots.slice(0, 6).map(t => ({ c: t.cond, tree: ser(t) })) : undefined;
+}
 
 // ---- drive ----
 const out = [];
@@ -248,7 +321,7 @@ for (const m of modules) {
     const r = results.get(fid);
     const els = r.rets.filter(hasEl);
     if (!els.length) continue;
-    comps.push({ fid, name: fnName(fid) || undefined, render: renderMethods.has(fid) || undefined, trees: els.slice(0, 4).map(x => ser(x)) });
+    comps.push({ fid, name: fnName(fid) || undefined, render: renderMethods.has(fid) || undefined, trees: els.slice(0, 4).map(x => ser(x)), branches: lostBranches(r) });
   }
   // Theme modules: keep their exported values (colour/font token tables).
   const getterGroups = {};
@@ -292,11 +365,25 @@ for (const m of modules) {
   if (assetMaps.length) for (const k of Object.keys(ctx.exports)) for (const am of assetMaps) {
     for (const side of ['dark', 'light']) if (am.props[side]?.k === 'obj') for (const [name, x] of Object.entries(am.props[side].props)) if (x.k === 'mod') texts[(side === 'dark' ? '~dark.' : '') + k + '.' + name] = '#' + x.path;
   }
+  // Route registries: exported {name: NavigationKeys.X | 'X', component: <imported screen>} entries,
+  // kept as [route name, module path, export name] so screen links can follow navigate(NavigationKeys.X).
+  const routes = [];
+  const findRoutes = (v, depth, seen) => {
+    if (!v || depth > 4 || seen.has(v)) return;
+    seen.add(v);
+    if (v.k === 'obj') {
+      const n = v.props.name, c = v.props.component ?? v.props.screen;
+      const key = n && (isLit(n) ? n.v : n.k === 'get' ? n.name : null), target = c && ser(c);
+      if (typeof key === 'string' && target?.$m) routes.push([key, target.$m, target.$p?.at(-1)]);
+      else for (const x of Object.values(v.props)) findRoutes(x, depth + 1, seen);
+    } else if (v.k === 'arr') for (const x of v.items) findRoutes(x, depth + 1, seen);
+  };
+  for (const v of Object.values(ctx.exports)) findRoutes(v, 0, new Set());
   const hasTexts = Object.keys(texts).length > 0;
-  if (!comps.length && !themeExports && !hasTexts && !Object.keys(getterGroups).length) continue;
+  if (!comps.length && !themeExports && !hasTexts && !Object.keys(getterGroups).length && !routes.length) continue;
   const exports = {};
   for (const [k, v] of Object.entries(ctx.exports)) if (v.k === 'fn') exports[k] = v.fid; else if (v.k === 'call') { const f = v.args.find(x => x.k === 'fn'); if (f) exports[k] = f.fid; }
-  out.push({ path: m.path, exports, comps, theme: themeExports, getters: Object.keys(getterGroups).length ? getterGroups : undefined, texts: hasTexts ? texts : undefined });
+  out.push({ path: m.path, exports, comps, theme: themeExports, getters: Object.keys(getterGroups).length ? getterGroups : undefined, texts: hasTexts ? texts : undefined, routes: routes.length ? routes : undefined });
 }
 fs.writeFileSync(outPath, JSON.stringify({ hbc: hbcPath, modules: out }));
 console.log(JSON.stringify({ hbc: hbcPath, modulesWithTrees: out.length, components: out.reduce((n, m) => n + m.comps.length, 0) }));

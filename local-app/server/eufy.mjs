@@ -1,3 +1,6 @@
+import { EVENT_LABELS, deviceKey } from './events.mjs';
+import { describeSettings } from './settings.mjs';
+
 export function accountFailure(error,stage='sign-in') {
   const message=typeof error?.message==='string'?error.message:'';
   if(['EACCES','EPERM'].includes(error?.cause?.code))return `Eufy ${stage} failed: this server process is denied network access. Close it and run Start Monitor.cmd directly from Windows. If it persists, check firewall permissions for Node.js.`;
@@ -15,8 +18,8 @@ export function accountFailure(error,stage='sign-in') {
 }
 
 export class EufyAccount {
-  constructor({loadSdk = () => import('@mega-yfue/eufy-sdk'), onChange = () => {}, diag = {log() {}}} = {}) {
-    this.loadSdk = loadSdk; this.onChange = onChange; this.diag = diag; this.status = 'signed-out'; this.devices = []; this.client = null; this.busy = false; this.challenge = null;
+  constructor({loadSdk = () => import('@mega-yfue/eufy-sdk'), onChange = () => {}, diag = {log() {}}, events = null, thumbnailDelayMs = 4000} = {}) {
+    this.loadSdk = loadSdk; this.onChange = onChange; this.diag = diag; this.events = events; this.thumbnailDelayMs = thumbnailDelayMs; this.status = 'signed-out'; this.devices = []; this.client = null; this.busy = false; this.challenge = null;
   }
   async available() { try { await this.loadSdk(); return true; } catch { return false; } }
   snapshot() { return {status:this.status, devices:this.devices, challenge:this.challenge}; }
@@ -31,6 +34,7 @@ export class EufyAccount {
       this.sdk=sdk;
       this.client=new sdk.EufyMega({email,password,countryCode,...(this.diag.logger?{logger:this.diag.logger}:{})});
       this.client.on('error', e => {this.diag.log('sdk:event','client error',e);this.onChange('Eufy reported a connection error. Try refreshing the device list.');});
+      this.client.on('event', e => void this.record(e).catch(err => this.diag.log('events','record failed',err)));
       this.client.on('sessionExpired', () => {this.status='expired';this.onChange('Session expired. Sign out and sign in again.');});
       this.status='signing-in'; this.onChange('Signing in to Eufy.');
       return await this.accept(await this.client.login());
@@ -71,7 +75,7 @@ export class EufyAccount {
     const records=await this.client.getDevices();
     this.devices=await Promise.all(records.map(async r=>{
       const d=await this.client.getDevice(r.sn); const cam=d.camera?.();
-      const info={sn:r.sn,name:r.name || r.sn,model:String(r.model || r.productCode || r.product_code || ''),codec:d.codec || '',capabilities:Array.isArray(d.capabilities)?d.capabilities:[],canLive:typeof cam?.openReadable==='function',stationSn:r.stationSn && r.stationSn!==r.sn?r.stationSn:null};
+      const info={sn:r.sn,key:deviceKey(r.sn),name:r.name || r.sn,model:String(r.model || r.productCode || r.product_code || ''),codec:d.codec || '',capabilities:Array.isArray(d.capabilities)?d.capabilities:[],canLive:typeof cam?.openReadable==='function',stationSn:r.stationSn && r.stationSn!==r.sn?r.stationSn:null};
       this.diag.log('account','device',{model:info.model,codec:info.codec,canLive:info.canLive,homeBase:!!info.stationSn,capabilities:info.capabilities,recordKeys:Object.keys(r),deviceType:r.deviceType ?? r.device_type});
       return info;
     }));
@@ -89,6 +93,37 @@ export class EufyAccount {
     this.diag.log('media','openReadable returned',{ms:Date.now()-started,ok:!!input});
     if(!input) throw new Error('The camera did not open a media stream.');
     return input;
+  }
+  // A semantic event from push or P2P. Only detections are kept; the push thumbnail is read from the
+  // SDK's retained snapshot a few seconds later, because it is fetched after the event itself arrives.
+  async record(e) {
+    if(!this.events || !EVENT_LABELS[e?.eventName]) return null;
+    const device=this.devices.find(d=>d.sn===e.deviceSn) || this.devices.find(d=>d.sn===e.stationSn) || {};
+    const event=await this.events.add({kind:e.eventName,device});
+    this.diag.log('events','event',{kind:e.eventName,model:device.model,eventType:e.eventType,thumbnail:!!e.thumbnailUrl});
+    this.onChange(`${event.label}: ${event.deviceName}.`);
+    if(device.sn) setTimeout(()=>void this.fetchThumbnail(device.sn,event.id),this.thumbnailDelayMs).unref?.();
+    return event;
+  }
+  async fetchThumbnail(sn,id) {
+    try {
+      const shot=(await this.client?.getDevice(sn))?.camera?.()?.snapshotStored;
+      if(typeof shot!=='function') return false;
+      const jpeg=await shot();
+      return Buffer.isBuffer(jpeg) ? await this.events.attach(id,jpeg) : false;
+    } catch(e) { this.diag.log('events','thumbnail failed',e); return false; }
+  }
+  async latestPicture(sn) {
+    if(this.status!=='connected' || !this.devices.some(d=>d.sn===sn)) throw new Error('Select a device on this account.');
+    const shot=(await this.client.getDevice(sn)).camera?.()?.snapshotStored;
+    if(typeof shot!=='function') return null;
+    try { const jpeg=await shot(); return Buffer.isBuffer(jpeg) && jpeg.length ? jpeg : null; } catch(e) { this.diag.log('events','stored picture failed',e); return null; }
+  }
+  async settings(sn) {
+    if(this.status!=='connected' || !this.devices.some(d=>d.sn===sn)) throw new Error('Select a device on this account.');
+    const result=describeSettings(await this.client.getDevice(sn));
+    this.diag.log('settings','read',{model:this.devices.find(d=>d.sn===sn)?.model,reported:result.reported,capabilities:result.capabilities});
+    return result;
   }
   async disconnect() {
     if(this.busy) throw new Error('Wait for the current sign-in or verification request to finish.');

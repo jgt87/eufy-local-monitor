@@ -89,6 +89,7 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
   const bundle = file.replace(/\.json$/, '');
   const { modules } = JSON.parse(fs.readFileSync(path.join(modDir, file), 'utf8'));
   const byPath = new Map(modules.map(m => [m.path, m]));
+  const treeMods = new Map(JSON.parse(fs.readFileSync(path.join(root, 'ui/trees', file), 'utf8')).modules.map(m => [m.path, m]));
 
   const lang = {};
   for (const m of modules.filter(m => /_language_en\.(js|ts|json)$/.test(m.path))) for (const o of m.objects) Object.assign(lang, o);
@@ -111,12 +112,35 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
   const ids = new Map(appMods.map((m, i) => [m.path, i]));
   const screenNames = new Map();
   appMods.forEach((m, i) => { const base = m.path.split('_').pop().replace(/\.[^.]+$/, ''); if (/(Screen|Page)\d*$/.test(base)) screenNames.set(base, i); });
+  // Route names from the registries (NavigationConfig route tables, <Stack.Screen name component>
+  // elements), so navigate(NavigationKeys.SettingsGeneral) links to GeneralScreen.
+  const routeNames = new Map(), registries = new Set();
+  const addRoute = (name, target, from) => {
+    const t = ids.get(target);
+    if (typeof name === 'string' && t !== undefined && !routeNames.has(name)) routeNames.set(name, t);
+    registries.add(from);
+  };
+  const walkRoutes = (v, from) => {
+    if (!v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { for (const x of v) walkRoutes(x, from); return; }
+    if (v.$props && typeof v.$props.name === 'string' && v.$props.component?.$m) addRoute(v.$props.name, v.$props.component.$m, from);
+    for (const x of Object.values(v)) walkRoutes(x, from);
+  };
+  for (const tm of treeMods.values()) {
+    for (const [name, target] of tm.routes ?? []) addRoute(name, target, tm.path);
+    if (/_(Navigator|App)\.tsx$/.test(tm.path)) walkRoutes(tm.comps, tm.path);
+  }
+  const keyModules = new Set(appMods.filter(m => /_NavigationKeys\.tsx?$/.test(m.path)).map(m => m.path));
+  for (const k of keyModules) registries.add(k);
 
   const out = appMods.map((m, i) => {
     const short = m.path.slice(prefix.length);
     const base = short.split('_').pop();
     const stem = base.replace(/\.[^.]+$/, '');
-    const kind = /(Screen|Page)\d*$/.test(stem) ? 'screen' : /(Modal|Dialog|Sheet|Popup|Alert)\d*$/.test(stem) ? 'modal' : /\.tsx$|\.jsx$/.test(base) ? 'component' : 'logic';
+    // Plain .ts files cannot hold JSX, and use* files are hooks: view models named *ViewModal.ts,
+    // useVideoGuideScreen.ts and the BCRNDialog.ts native wrapper are logic despite their names.
+    const ui = !/\.ts$/.test(base) && !/^use[A-Z]/.test(stem);
+    const kind = !ui ? 'logic' : /(Screen|Page)\d*$/.test(stem) ? 'screen' : /(Modal|Dialog|Sheet|Popup|Alert)\d*$/.test(stem) ? 'modal' : /\.tsx$|\.jsx$/.test(base) ? 'component' : 'logic';
     const text = [], seenText = new Set();
     for (const s of m.strings) {
       if (seenText.has(s)) continue;
@@ -137,8 +161,30 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
     }
     const images = m.deps.filter(d => assets[d]).map(d => assets[d]);
     const deps = m.deps.map(d => ids.get(d)).filter(x => x !== undefined && x !== i);
-    const navigates = [...new Set(m.strings.filter(s => screenNames.has(s) && screenNames.get(s) !== i).map(s => screenNames.get(s)))];
-    return { p: short, kind, fns: m.functions, deps, navigates, text, images, colors: [...colors], styles: styles.slice(0, 80) };
+    // Screen names in the strings, plus route names when the file imports the route keys or the
+    // name itself reads as a screen (avoids matching plain words such as "Details").
+    const usesKeys = m.deps.some(d => keyModules.has(d));
+    const target = s => screenNames.get(s) ?? (routeNames.has(s) && (usesKeys || /(Screen|Page)\d*$/.test(s)) ? routeNames.get(s) : undefined);
+    const navigates = [...new Set(m.strings.map(target).filter(t => t !== undefined && t !== i))];
+    // Re-export files (`export { IntroScreen as Screen }`) have no tree of their own: point at the
+    // imported UI module whose name the file mentions.
+    const tm = treeMods.get(m.path);
+    const alias = kind !== 'screen' && kind !== 'modal' || tm?.comps.length || !m.strings.includes('defineProperty') ? undefined
+      : deps.find(d => treeMods.get(appMods[d].path)?.comps.length && m.strings.includes(appMods[d].path.split('_').pop().replace(/\.[^.]+$/, '')));
+    // Owner's doorbell model: own references (isT8214 checks, model literals, T8214 text keys) and
+    // elements recovered inside a T8214 branch.
+    const refs = [...new Set(m.strings.filter(s => /T8214/i.test(s) && s.length < 60))];
+    const branchEls = tm ? tm.comps.reduce((n, c) => n + (JSON.stringify(c.trees).match(/"\$c":/g) || []).length + (c.branches?.length || 0), 0) : 0;
+    return { p: short, kind, fns: m.functions, deps, navigates, text, images, colors: [...colors], styles: styles.slice(0, 80), alias, registry: registries.has(m.path) || undefined, t8214: refs.length ? { refs, branches: branchEls } : undefined };
+  });
+  // T8214 references reached through the screen's own logic files (view models, hooks in the same
+  // feature folder or a parent folder); shared utils such as DeviceUtils would mark everything.
+  const folder = p => p.split('_').slice(0, -1).join('/');
+  out.forEach((m, i) => {
+    if (m.kind === 'logic') return;
+    const own = folder(m.p);
+    const via = m.deps.filter(d => out[d].kind === 'logic' && out[d].t8214?.refs.includes('isT8214') && (own === folder(out[d].p) || own.startsWith(folder(out[d].p) + '/')) && folder(out[d].p).split('/').length > 2);
+    if (via.length) (m.t8214 ||= { refs: [], branches: 0 }).via = via;
   });
   write(`bundles/${bundle}.json`, { bundle, prefix, modules: out });
   write(`lang/${bundle}.json`, lang);
@@ -146,6 +192,8 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
     bundle, prefix, modules: out.length,
     screens: out.filter(m => m.kind === 'screen').length, modals: out.filter(m => m.kind === 'modal').length,
     components: out.filter(m => m.kind === 'component').length, langKeys: Object.keys(lang).length, assets: Object.keys(assets).length,
+    t8214: out.filter(m => m.kind !== 'logic' && m.t8214).length,
+    links: out.reduce((n, m) => n + (m.registry ? 0 : m.navigates.length), 0),
   });
 }
 write('bundles.json', bundleIndex);

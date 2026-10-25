@@ -4,8 +4,17 @@ import { DevicesPanel } from './components/DevicesPanel.jsx';
 import { AccountCard } from './components/AccountCard.jsx';
 import { MonitorPage } from './components/MonitorPage.jsx';
 import { Findings } from './components/Findings.jsx';
+import { EventsPage } from './components/EventsPage.jsx';
+import { SettingsPage } from './components/SettingsPage.jsx';
 import { useMonitor } from './hooks/useMonitor.js';
 import { safeStorage } from './lib/format.js';
+
+const PAGES = {
+  monitor: { title: d => d?.name || 'Doorbell monitor', lead: 'A clear view, from your own computer.' },
+  events: { title: () => 'Events', lead: 'Rings and detections received while the monitor runs.' },
+  settings: { title: d => (d ? `${d.name} settings` : 'Settings'), lead: 'What the selected device reports, read only.' },
+  findings: { title: () => 'What the APK reveals', lead: 'Recovered interfaces and capability declarations from version 6.1.10_30612.' },
+};
 
 export function App() {
   const { state, error, setError, busy, api, act } = useMonitor();
@@ -22,6 +31,8 @@ export function App() {
   const [answer, setAnswer] = useState('');
   const [rtsp, setRtsp] = useState('');
   const videoRef = useRef(null);
+  const [notice, setNotice] = useState(null);
+  const seenEvent = useRef(undefined);
 
   const account = state?.account || { status: 'signed-out', devices: [] };
   const connected = account.status === 'connected';
@@ -40,6 +51,13 @@ export function App() {
       setPlaying(false);
     }
   }, [state?.stream?.state, active?.id]);
+
+  // A new ring or detection while the page is open: show it once, even on another page.
+  useEffect(() => {
+    const latest = state?.latestEvent;
+    if (seenEvent.current === undefined) { if (state) seenEvent.current = latest?.id || null; return; }
+    if (latest && latest.id !== seenEvent.current) { seenEvent.current = latest.id; setNotice(latest); }
+  }, [state?.latestEvent?.id, !!state]);
 
   const start = kind => act('stream', async () => {
     setActive(null);
@@ -60,7 +78,7 @@ export function App() {
   };
   const challenge = event => { event.preventDefault(); void act('challenge', async () => { await api('challenge', { answer }); setAnswer(''); }); };
   const signout = () => act('logout', async () => { setActive(null); setPlaying(false); await api('logout'); setAnswer(''); });
-  const selectDevice = sn => { if (active?.sn && active.sn !== sn) void stop(); setSelected(sn); setPage('monitor'); };
+  const selectDevice = sn => { if (active?.sn && active.sn !== sn) void stop(); setSelected(sn); if (page === 'findings') setPage('monitor'); };
   const takeSnapshot = () => {
     const video = videoRef.current;
     if (!playing || !video?.videoWidth) return;
@@ -87,6 +105,12 @@ export function App() {
       <button className={page === 'monitor' ? 'tab active' : 'tab'} onClick={() => setPage('monitor')} aria-current={page === 'monitor' ? 'page' : undefined}>
         <Icon name="devices" size={size} /><span>Cameras</span>{className !== 'tabbar' && <small className="count">{account.devices.filter(d => d.canLive).length}</small>}
       </button>
+      <button className={page === 'events' ? 'tab active' : 'tab'} onClick={() => setPage('events')} aria-current={page === 'events' ? 'page' : undefined}>
+        <Icon name="bell" size={size} /><span>Events</span>{className !== 'tabbar' && !!state?.eventCount && <small className="count">{state.eventCount}</small>}
+      </button>
+      <button className={page === 'settings' ? 'tab active' : 'tab'} onClick={() => setPage('settings')} aria-current={page === 'settings' ? 'page' : undefined}>
+        <Icon name="sliders" size={size} /><span>Settings</span>
+      </button>
       <button className={page === 'findings' ? 'tab active' : 'tab'} onClick={showEvidence} aria-current={page === 'findings' ? 'page' : undefined}>
         <Icon name="findings" size={size} /><span>APK findings</span>
       </button>
@@ -110,8 +134,8 @@ export function App() {
         </aside>
         <main className="main">
           <div className="page-title">
-            <h1>{page === 'monitor' ? (device?.name || 'Doorbell monitor') : 'What the APK reveals'}</h1>
-            <p>{page === 'monitor' ? 'A clear view, from your own computer.' : 'Recovered interfaces and capability declarations from version 6.1.10_30612.'}</p>
+            <h1>{PAGES[page].title(device)}</h1>
+            <p>{PAGES[page].lead}</p>
           </div>
           {error && (
             <div className="error-banner" role="alert">
@@ -120,11 +144,21 @@ export function App() {
               <button aria-label="Dismiss error" onClick={() => setError('')}>Dismiss</button>
             </div>
           )}
+          {notice && (
+            <div className="event-banner" role="status">
+              <Icon name={notice.kind === 'doorbellPress' ? 'doorbell' : 'bell'} />
+              <span><strong>{notice.label}</strong> · {notice.deviceName}</span>
+              <button onClick={() => { setNotice(null); setPage('events'); }}>View</button>
+              <button aria-label="Dismiss event" onClick={() => setNotice(null)}>Dismiss</button>
+            </div>
+          )}
+          {page === 'events' && <EventsPage state={state} device={device} api={api} busy={busy} act={act} setError={setError} />}
+          {page === 'settings' && <SettingsPage device={device} connected={connected} api={api} />}
           {page === 'monitor'
             ? <MonitorPage state={state} device={device} connected={connected} busy={busy} active={active} playing={playing} source={source} rtsp={rtsp} setRtsp={setRtsp}
                 videoRef={videoRef} onStart={start} onStop={stop} onRefresh={refreshDevices} onPlaying={() => setPlaying(true)} onSnapshot={takeSnapshot} setError={setError}
                 onVideoError={message => { setPlaying(false); setError(message); setActive(null); void api('streams/stop').catch(() => {}); }} />
-            : <Findings data={evidence} />}
+            : page === 'findings' && <Findings data={evidence} />}
         </main>
       </div>
       {tabs('tabbar', 22)}

@@ -59,3 +59,23 @@ export async function renderContext(bundle) {
   ]);
   return { bundle, idx, sdk, assets: { ...sdkAssets, ...assetMap }, lang: { ...native, ...sdkLang, ...langMap }, tokens: tok };
 }
+
+// The tree module a catalogue entry renders: its own, or for a re-export file (`alias`) the module it re-exports.
+export function treeModuleFor(cat, idx, i) {
+  const m = cat.modules[i];
+  const own = idx.byPath.get(cat.prefix + m.p);
+  if (own?.comps.length || m.alias === undefined) return own;
+  return idx.byPath.get(cat.prefix + cat.modules[m.alias].p);
+}
+
+// Model-branch labels from the tree recovery: 'T8214' / 'T8214*' (prefix test) for the branch taken on
+// the owner's doorbell, '!T8214' for the else side; other models (such as 'T8214C') keep their name.
+const OWNER = new Set(['T8214', 'T8214*']);
+export function branchHidden(labels, variant) {
+  if (!labels || variant === 'all') return false;
+  return labels.some(l => {
+    const neg = l.startsWith('!'), owner = OWNER.has(neg ? l.slice(1) : l);
+    return variant === 'T8214' ? (owner ? neg : !neg) : owner && !neg;
+  });
+}
+export const branchText = labels => labels.map(l => (l.startsWith('!') ? `not ${l.slice(1)}` : l)).join(' · ');

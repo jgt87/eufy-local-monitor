@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  local-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: local-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.5'
+          cache: npm
+          cache-dependency-path: local-app/package-lock.json
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Build front end
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: No vendor material tracked
+        working-directory: .
+        run: |
+          if git ls-files | grep -Ei '\.(apk|so|hbc|ttf|otf|dex)$|^APKDownload/|^analysis/(decoded|decompiled|asset-evidence)/|^analysis/ui/(rn|modules|trees|fonts|atlas/data)/'; then
+            echo "Vendor material is tracked; remove it from git." >&2
+            exit 1
+          fi

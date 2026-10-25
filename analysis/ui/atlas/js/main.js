@@ -7,6 +7,8 @@ import { screenView } from './views/screen.js';
 import { tokensView } from './views/tokens.js';
 import { nativeListView, nativeLayoutView } from './views/native.js';
 import { assetsView } from './views/assets.js';
+import { mapView } from './views/map.js';
+import { t8214View } from './views/t8214.js';
 import { initSearch } from './views/search.js';
 
 export const BUNDLE_TITLES = {
@@ -24,6 +26,8 @@ async function buildNav() {
     h('a', { href: '#/' }, 'Overview'),
     h('a', { href: '#/tokens' }, 'Design tokens'),
     h('a', { href: '#/native' }, 'Native layouts'),
+    h('a', { href: '#/map' }, 'Screen map'),
+    h('a', { href: '#/t8214' }, h('span', {}, 'T8214 variants'), h('small', {}, list.reduce((n, b) => n + (b.t8214 || 0), 0))),
     h('div', { class: 'nav-head' }, 'React Native bundles'),
     ...list.map(b => h('a', { href: `#/b/${b.bundle}` }, h('span', {}, BUNDLE_TITLES[b.bundle] || b.bundle), h('small', {}, b.screens + b.modals || b.components))),
   );
@@ -49,6 +53,8 @@ async function route() {
     else if (parts[0] === 'native' && parts[1]) node = await nativeLayoutView(parts[1]);
     else if (parts[0] === 'native') node = await nativeListView(parts[1]);
     else if (parts[0] === 'assets' && parts[1]) node = await assetsView(parts[1]);
+    else if (parts[0] === 'map') node = await mapView(parts[1], parts[2] !== undefined ? Number(parts[2]) : undefined);
+    else if (parts[0] === 't8214') node = await t8214View();
     else if (parts[0] === 'b' && parts[2] !== undefined) node = await screenView(parts[1], Number(parts[2]));
     else if (parts[0] === 'b' && parts[1]) node = await bundleView(parts[1]);
     else node = h('p', {}, 'Unknown page.');

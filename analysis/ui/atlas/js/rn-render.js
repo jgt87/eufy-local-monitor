@@ -2,6 +2,7 @@
 // The trees come from straight-line symbolic evaluation, so every conditional branch is present
 // and runtime data (device names, lists) is absent. Unknown components render as labelled boxes.
 import { h } from './dom.js';
+import { branchHidden, branchText } from './data.js';
 
 const RN_INDEX = 'node_modules_react-native_index.js';
 const PRIMITIVE_ALIASES = {
@@ -34,10 +35,11 @@ const SVG_ATTRS = {
 };
 const TRANSPARENT =/^(Fragment|StrictMode|Suspense|Profiler|Consumer|Portal|PortalHost|Host|GestureDetector|NavigationContainer|SafeAreaProvider|\w*Provider|\w*Context|ErrorBoundary|KeyboardAwareView)$/;
 
-export function createRenderer(rc, { mode = 'light', onSelect } = {}) {
+// variant: 'all' shows every model branch (marked), 'T8214' / 'other' keep only the matching side.
+export function createRenderer(rc, { mode = 'light', onSelect, variant = 'all' } = {}) {
   const { idx, sdk, assets, lang, tokens } = rc;
   const info = new WeakMap();
-  const stats = { elements: 0, expanded: 0, unresolved: new Map(), texts: 0, images: 0 };
+  const stats = { elements: 0, expanded: 0, unresolved: new Map(), texts: 0, images: 0, branches: 0 };
 
   // ---------- value resolution ----------
   function lookupVar(path, ctx) {
@@ -320,7 +322,20 @@ export function createRenderer(rc, { mode = 'light', onSelect } = {}) {
 
   function mark(el, data) { info.set(el, data); el.classList.add('rn-node'); return el; }
 
+  // Elements recovered inside a device-model branch: dropped when the variant excludes them,
+  // otherwise marked with the condition.
   function renderEl(node, ctx, inText) {
+    if (node.$c && branchHidden(node.$c, variant)) return document.createDocumentFragment();
+    const el = renderElement(node, ctx, inText);
+    if (node.$c && el instanceof Element) {
+      stats.branches++;
+      el.classList.add('rn-branch');
+      el.dataset.branch = branchText(node.$c);
+    }
+    return el;
+  }
+
+  function renderElement(node, ctx, inText) {
     stats.elements++;
     const props = node.$props || {};
     const type = resolveType(node.$e, ctx);
@@ -495,8 +510,9 @@ export function createRenderer(rc, { mode = 'light', onSelect } = {}) {
     return comp.trees[best];
   }
 
+  // treeIndex: a returned tree's index, 'b<n>' for a model-branch tree, or undefined for the largest return.
   function renderComponent(comp, treeIndex) {
-    const tree = treeIndex !== undefined ? comp.trees[treeIndex] : mainTree(comp);
+    const tree = typeof treeIndex === 'string' ? comp.branches[Number(treeIndex.slice(1))].tree : treeIndex !== undefined ? comp.trees[treeIndex] : mainTree(comp);
     const root = h('div', { class: `rn-root ${mode}` });
     root.append(renderNode(tree, { props: undefined, parent: null, depth: 0, stack: new Set([comp.fid]) }));
     if (onSelect) root.addEventListener('click', e => {
