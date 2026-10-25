@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon.jsx';
 import { day, time } from '../lib/format.js';
+import { AlertsPanel } from './AlertsPanel.jsx';
 
 const ICONS = { doorbellPress: 'doorbell', motion: 'motion', personDetected: 'user', strangerDetected: 'user' };
 
@@ -62,7 +63,7 @@ export function EventsPage({ state, device, api, busy, act, setError }) {
         <div className="group empty-card">
           <Icon name="bell" size={28} />
           <p>No events yet</p>
-          <small>{state?.account.status === 'connected' ? 'Rings and detections appear here while the monitor is running.' : 'Sign in and keep the monitor running to collect rings and detections.'}</small>
+          <small>{state?.account.status === 'connected' ? 'Rings and detections appear here while the monitor is running. Start Monitor (background) keeps it running in the tray.' : 'Sign in and keep the monitor running to collect rings and detections.'}</small>
         </div>
       )}
 
@@ -73,6 +74,7 @@ export function EventsPage({ state, device, api, busy, act, setError }) {
             : <button className="text-button" onClick={() => setConfirmClear(true)}>Clear event history</button>}
         </div>
       )}
+      <AlertsPanel alerts={state?.alerts} api={api} act={act} busy={busy} />
       <p className="fine-print">Events are stored only on this PC, in the monitor’s .runtime folder. The eufy app keeps its own history.</p>
 
       {open && (

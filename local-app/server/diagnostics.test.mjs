@@ -26,3 +26,10 @@ test('video start detection reads the first NAL header', () => {
   const h265 = describeVideoStart(Buffer.from([0, 0, 0, 1, 0x40, 0x01]));
   assert.equal(h265.h265NalType, 32);
 });
+
+test('live-trace signCode stays readable while signatures are redacted', () => {
+  const out = redact({ phase: 'first-video-command', signCode: 8, accepted: true, sign: 'abc', signature: 'def' });
+  assert.equal(out.signCode, 8);
+  assert.equal(out.sign, '<redacted>');
+  assert.equal(out.signature, '<redacted>');
+});

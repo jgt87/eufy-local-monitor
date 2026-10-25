@@ -20,6 +20,7 @@ analysis/ui/trees/
 analysis/ui/fonts/
 analysis/ui/atlas/data/
 analysis/ui/.zips/
+analysis/ui/versions/
 analysis/ui/scratch-*
 
 # Tool state and local runtime output

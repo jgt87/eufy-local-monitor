@@ -82,7 +82,7 @@ export async function screenView(bundle, index) {
       h('div', { class: 'phone-col' }, phone),
       h('div', { class: 'side' },
         inspector,
-        section('Text', m.text.length, h('table', { class: 'kv' }, ...m.text.map(([k, t]) => h('tr', {}, h('td', {}, h('code', {}, k)), h('td', {}, t))))),
+        section('Text', m.text.length, h('table', { class: 'kv' }, ...m.text.map(([k, t]) => h('tr', {}, h('td', {}, h('code', {}, k)), h('td', {}, typeof rc.lang[k] === 'string' ? rc.lang[k] : t))))),
         section('Images', m.images.length, h('div', { class: 'thumbs' }, ...m.images.map(img => h('figure', {}, img.src ? h('img', { src: `/${img.src}`, alt: img.name, loading: 'lazy' }) : h('div', { class: 'missing' }), h('figcaption', {}, `${img.name} · ${img.w}×${img.h}`))))),
         section('Imports', m.deps.length, h('div', { class: 'chips' }, ...m.deps.map(i => h('span', { class: `chip ${cat.modules[i].kind}` }, link(i))))),
         m.t8214 ? section('T8214', m.t8214.refs.length + (m.t8214.via?.length || 0), t8214Info(m, link)) : null,

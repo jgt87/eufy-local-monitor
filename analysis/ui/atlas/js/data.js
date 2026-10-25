@@ -21,9 +21,27 @@ const atlas = p => json(`ui/atlas/data/${p}`);
 export const bundles = () => atlas('bundles.json');
 export const catalog = b => atlas(`bundles/${b}.json`);
 export const assets = b => atlas(`assets/${b}.json`);
-export const lang = b => atlas(`lang/${b}.json`);
 export const tokens = () => atlas('tokens.json');
 export const searchIndex = () => atlas('search.json');
+export const langs = () => atlas('langs.json');
+// Version manifests; a missing index (older data) reads as no versions.
+export const versionIndex = () => atlas('versions/index.json').catch(() => ({ current: null, versions: [] }));
+export const manifest = id => atlas(`versions/${id}.json`);
+
+// Preview language. English tables are the base; another language overlays its own table, so keys it
+// lacks keep the English text (native strings exist only in English, from config.en.apk).
+const LANG_KEY = 'atlas.lang';
+let language = 'en';
+try { language = localStorage.getItem(LANG_KEY) || 'en'; } catch { /* storage blocked */ }
+export const getLanguage = () => language;
+export function setLanguage(code) {
+  language = code || 'en';
+  try { localStorage.setItem(LANG_KEY, language); } catch { /* storage blocked */ }
+}
+export function lang(b, code = language) {
+  const en = atlas(`lang/${b}.json`);
+  return code === 'en' ? en : Promise.all([en, atlas(`lang/${code}/${b}.json`).catch(() => ({}))]).then(([e, l]) => ({ ...e, ...l }));
+}
 export const nativeStrings = () => atlas('native-strings.json');
 export const nativeColors = () => atlas('native-colors.json');
 export const nativeDimens = () => atlas('native-dimens.json');

@@ -8,17 +8,18 @@ import { EventsPage } from './components/EventsPage.jsx';
 import { SettingsPage } from './components/SettingsPage.jsx';
 import { useMonitor } from './hooks/useMonitor.js';
 import { safeStorage } from './lib/format.js';
+import { chime } from './lib/chime.js';
 
 const PAGES = {
   monitor: { title: d => d?.name || 'Doorbell monitor', lead: 'A clear view, from your own computer.' },
   events: { title: () => 'Events', lead: 'Rings and detections received while the monitor runs.' },
-  settings: { title: d => (d ? `${d.name} settings` : 'Settings'), lead: 'What the selected device reports, read only.' },
+  settings: { title: d => (d ? `${d.name} settings` : 'Settings'), lead: 'What the selected device reports, with battery and signal over time.' },
   findings: { title: () => 'What the APK reveals', lead: 'Recovered interfaces and capability declarations from version 6.1.10_30612.' },
 };
 
 export function App() {
   const { state, error, setError, busy, api, act } = useMonitor();
-  const [page, setPage] = useState('monitor');
+  const [page, setPage] = useState(() => (location.hash === '#events' ? 'events' : 'monitor'));
   const [selected, setSelected] = useState('');
   const [active, setActive] = useState(null);
   const [playing, setPlaying] = useState(false);
@@ -27,6 +28,7 @@ export function App() {
   const [query, setQuery] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(safeStorage.get('remember') === '1');
   const [country, setCountry] = useState(safeStorage.get('country') || 'NL');
   const [answer, setAnswer] = useState('');
   const [rtsp, setRtsp] = useState('');
@@ -56,7 +58,12 @@ export function App() {
   useEffect(() => {
     const latest = state?.latestEvent;
     if (seenEvent.current === undefined) { if (state) seenEvent.current = latest?.id || null; return; }
-    if (latest && latest.id !== seenEvent.current) { seenEvent.current = latest.id; setNotice(latest); }
+    if (latest && latest.id !== seenEvent.current) {
+      seenEvent.current = latest.id; setNotice(latest);
+      // Without Windows notifications the page itself sounds the alert.
+      const a = state.alerts;
+      if (a && !a.available && a.desktop && a.sound && a.kinds[latest.kind]) chime(latest.kind === 'doorbellPress');
+    }
   }, [state?.latestEvent?.id, !!state]);
 
   const start = kind => act('stream', async () => {
@@ -73,8 +80,9 @@ export function App() {
     event.preventDefault();
     const secret = password;
     setPassword('');
-    void act('login', () => api('login', { email, password: secret, countryCode: country }));
+    void act('login', () => api('login', { email, password: secret, countryCode: country, remember }));
     safeStorage.set('country', country);
+    safeStorage.set('remember', remember ? '1' : '0');
   };
   const challenge = event => { event.preventDefault(); void act('challenge', async () => { await api('challenge', { answer }); setAnswer(''); }); };
   const signout = () => act('logout', async () => { setActive(null); setPlaying(false); await api('logout'); setAnswer(''); });
@@ -128,7 +136,7 @@ export function App() {
           {tabs('sidenav', 20)}
           <DevicesPanel devices={devices} allCount={account.devices.length} selected={selected} connected={connected} busy={busy} query={query} onQuery={setQuery} onSelect={selectDevice} onRefresh={refreshDevices} />
           <AccountCard account={account} sdkReady={!!state?.tools.sdk} stateLoaded={!!state} busy={busy}
-            form={{ email, setEmail, password, setPassword, country, setCountry, answer, setAnswer }}
+            form={{ email, setEmail, password, setPassword, country, setCountry, answer, setAnswer, remember, setRemember }}
             onLogin={login} onChallenge={challenge} onSignout={signout} />
           <footer className="fine-print sidebar-footer">Independent local client · unaffiliated with Anker eufy.</footer>
         </aside>

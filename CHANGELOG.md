@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
+### Added
+- Background mode: `Start Monitor (background).cmd` runs the monitor without a console, with a tray icon (Open monitor, Start with Windows, Restart monitor, Quit), one copy per user and automatic restart after a crash. The server stops when its tray process is gone.
+- Keep me signed in: the session token, push credentials, email and country are saved in `.runtime/account/`, encrypted with AES-256-GCM under a DPAPI-protected key, so the monitor signs in by itself at startup. The password is never stored. Signing out deletes the saved sign-in.
+- Alerts on this PC: Windows notifications for chosen rings and detections, shown with no browser open and opening the Events page when clicked, with optional sound and a test button. Without Windows notifications the open page plays a chime.
+- Battery and Wi-Fi signal history: readings at sign-in, every 15 minutes and on reported changes, kept 60 days in `.runtime/history.json` and charted on the Settings page with hover values and a readings table.
+- Settings changes: motion detection, chime and mechanical chime switches, and the ringtone and motion sensitivity when the SDK offers choices, each confirmed before it is sent. Free numbers are never written.
+- Live view preparation for the T8214: a static comparison of the app's and the SDK's live start with ranked failure causes and the log lines that confirm each (`analysis/streaming/T8214-LIVE.md`). Live view asks the SDK for a five-minute battery budget instead of stopping after about 55 s. `EUFY_LIVE_ECC=1`, on in the diagnostics launcher, hands the SDK the session's ECC key so end-to-end encrypted frames can be decoded.
+- UI atlas: text search across all screens by displayed text (in the preview language), text key or file name (`#/search/<query>` and the header box).
+- UI atlas: preview language switch with the 38 languages from the React Native bundles' own tables, Dutch included, with English fallback, remembered per browser.
+- UI atlas: every build writes a version manifest. `build-all.mjs --apk <dir>` builds another APK set without touching the main data, and `tools/diff-versions.mjs` and the `#/diff` page compare two versions: added, removed and changed screens, texts, T8214 tags and strings.
+- CI runs the browser test in Google Chrome and keeps its screenshots.
+
+### Changed
+- Diagnostics keep `signCode` in live-start traces readable and log the device's channel and station relationship.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

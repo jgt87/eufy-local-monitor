@@ -1,5 +1,6 @@
 import { Icon } from './Icon.jsx';
 import { ACCOUNT_LABELS } from '../lib/format.js';
+import { Switch } from './Switch.jsx';
 
 const COUNTRIES = [['NL', 'Netherlands'], ['BE', 'Belgium'], ['DE', 'Germany'], ['GB', 'United Kingdom'], ['FR', 'France'], ['US', 'United States'], ['CA', 'Canada'], ['AU', 'Australia']];
 
@@ -20,6 +21,7 @@ export function AccountCard({ account, sdkReady, stateLoaded, busy, form, onLogi
         {connected ? (
           <>
             <p className="note">Your devices are loaded. Choose a camera to start viewing.</p>
+            {account.remembered && <p className="note">The sign-in is saved on this PC, so the monitor signs in by itself when it starts. Sign out to remove it.</p>}
             <button className="pill secondary wide" disabled={!!busy} onClick={onSignout}><Icon name="logout" size={16} />Sign out</button>
           </>
         ) : (
@@ -44,11 +46,15 @@ export function AccountCard({ account, sdkReady, stateLoaded, busy, form, onLogi
                 <select id="country" value={form.country} onChange={e => form.setCountry(e.target.value)}>
                   {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                 </select>
+                <div className="remember-row">
+                  <span id="remember-label">Keep me signed in on this PC</span>
+                  <Switch label="Keep me signed in on this PC" checked={form.remember} onChange={form.setRemember} />
+                </div>
                 <button className="pill primary wide" disabled={!!busy || !sdkReady}>{busy === 'login' ? 'Signing in…' : 'Sign in to Eufy'}<Icon name="arrow" size={17} /></button>
                 {['error', 'expired'].includes(account.status) && <button className="text-button" type="button" onClick={onSignout} disabled={!!busy}>Reset sign-in</button>}
               </form>
             )}
-            <small className="fine-print">Connects to Eufy’s cloud and your devices. Credentials stay in process memory.</small>
+            <small className="fine-print">Connects to Eufy’s cloud and your devices. Your password is never stored; “Keep me signed in” saves only the session, encrypted for your Windows account.</small>
           </>
         )}
       </div>

@@ -4,7 +4,7 @@ Static research into the eufy Security Android app 6.1.10 (build 30612), plus `l
 
 ## Hard rules
 
-- **Vendor material never goes into git.** That covers `APKDownload/` (the original APK set, read-only source data), anything extracted or decompiled from it, `.so`/`.hbc` files, fonts, drawables, and the derived `analysis/ui/{rn,modules,trees,fonts,atlas/data}` and `analysis/asset-evidence/`. The root `.gitignore` enforces this. Run `git add -A --dry-run` before every push to check.
+- **Vendor material never goes into git.** That covers `APKDownload/` (the original APK set, read-only source data), anything extracted or decompiled from it, `.so`/`.hbc` files, fonts, drawables, and the derived `analysis/ui/{rn,modules,trees,fonts,versions,atlas/data}` and `analysis/asset-evidence/`. The root `.gitignore` enforces this. Run `git add -A --dry-run` before every push to check.
 - The owner's doorbell is a **T8214**. Never write its full serial or MAC address into files, commits or logs; use the model prefix only.
 - Nothing in this repo (code, docs, commits, file names) names an AI assistant, and commits carry no AI attribution. Commits use the repo-local noreply email that is already configured.
 - A release means: add the change to `CHANGELOG.md` under Unreleased, bump `local-app/package.json`, tag `vX.Y.Z`, and run `gh release create` with a `git archive` source zip.
@@ -17,15 +17,18 @@ Windows, Node 24.5+. Tests use the Playwright copy in `local-app/node_modules` w
 | --- | --- |
 | Monitor: build / start | `cd local-app && npm.cmd run build && npm.cmd start` (port 4287; `Start Monitor.cmd` does both) |
 | Monitor: unit tests | `cd local-app && npm.cmd test` (node:test over `server/*.test.mjs`) |
-| Monitor: one test file | `cd local-app && node --test server/diagnostics.test.mjs` (also `events.test.mjs`, `app.test.mjs`) |
+| Monitor: one test file | `cd local-app && node --test server/diagnostics.test.mjs` (also `events.test.mjs`, `features.test.mjs`, `app.test.mjs`) |
 | Monitor: browser test | Start a **fresh** instance (`PORT=4288 node server/index.mjs`), then `PLAYWRIGHT_CHANNEL=msedge MONITOR_URL=http://127.0.0.1:4288 node test/browser.mjs`. It looks for the startup line in the activity list, so a long-running instance fails it. |
-| Monitor with diagnostics | `Start Monitor (diagnostics).cmd` (`EUFY_DIAG=1` plus `local-app/tools/netwatch.ps1`); logs go to `local-app/.runtime/` |
+| Monitor in the background | `Start Monitor (background).cmd` → `local-app/tools/tray.ps1` (Windows PowerShell 5.1, WinForms tray; test on another port with `-NoBrowser -Port 4289`) |
+| Monitor with diagnostics | `Start Monitor (diagnostics).cmd` (`EUFY_DIAG=1`, `EUFY_LIVE_ECC=1` plus `local-app/tools/netwatch.ps1`); logs go to `local-app/.runtime/` |
 | UI atlas: rebuild all data from the APK | `node analysis/ui/tools/build-all.mjs` (under a minute) |
+| UI atlas: build another APK set | `node analysis/ui/tools/build-all.mjs --apk <dir> [--version <label>]` (work files in `analysis/ui/versions/<id>/`, manifest in `atlas/data/versions/`; never writes into the APK folder) |
+| UI atlas: compare versions | `node analysis/ui/tools/diff-versions.mjs [<old> <new>] [--all] [--json <file>]` (or `#/diff` in the atlas) |
 | UI atlas: serve | `node analysis/ui/atlas/serve.mjs 4291` → `http://127.0.0.1:4291/ui/atlas/` (or `Start UI Atlas.cmd`) |
 | UI atlas: render every screen | `PLAYWRIGHT_MODULE_URL=file:///C:/Files/Apps/EufySecurity/local-app/node_modules/playwright/index.mjs node analysis/ui/atlas/test/smoke.mjs` (must print PASS) |
 | UI atlas: screenshots | same env, then `node analysis/ui/atlas/test/shots.mjs <outDir> "#/b/SEC_SETTING/190" "#/tokens" "#/map" "#/t8214"` |
 
-There is no linter. CI (`.github/workflows/ci.yml`, Ubuntu) runs the build, the unit tests and a check that no vendor files are tracked; the browser test and the atlas smoke test run only locally.
+There is no linter. CI (`.github/workflows/ci.yml`, Ubuntu) runs the build, the unit tests, the browser test in Google Chrome (`PLAYWRIGHT_CHANNEL=chrome`; Playwright's Chromium has no H.264) and a check that no vendor files are tracked. The atlas smoke test needs the APK-derived data, so it runs only locally.
 
 ## local-app architecture
 
@@ -34,10 +37,14 @@ There is no linter. CI (`.github/workflows/ci.yml`, Ubuntu) runs the build, the 
 - `server/media.mjs` (`MediaSession`) pipes that stream, an RTSP URL or a lavfi test pattern through FFmpeg into fragmented MP4. The browser plays it with MediaSource (`src/components/LiveVideo.jsx`). Sessions time out after 45 s without video and stop after 5 minutes. For RTSP, FFmpeg stderr is never kept, because it can contain credentials.
 - `server/diagnostics.mjs` is opt-in (`EUFY_DIAG=1`). It passes a redacting logger to the SDK (`new EufyMega({logger})`), whose `logger.debug` also carries its live-start trace phases. It records swallowed errors, FFmpeg stderr for camera streams, and the first video bytes (H.264 or H.265 NAL type). Redaction keeps a serial's 4-character model prefix (`T8214<sn>`). Its rules are covered by `diagnostics.test.mjs`.
 - `server/events.mjs` (`EventLog`) keeps rings and detections in `.runtime/events/` (`events.json` plus `<id>.jpg`, newest 200). `EufyAccount.record` takes the SDK's catch-all `event` stream, keeps only the names in `EVENT_LABELS`, and attaches the picture from `camera().snapshotStored()` a few seconds later, because the push thumbnail arrives after the event. Records carry `deviceKey` (a short SHA-256 of the serial), never the serial. `/api/state` carries `latestEvent` and `eventCount`; the page shows a banner when `latestEvent` changes.
-- `server/settings.mjs` turns `device.properties` and `device.getProperties()` into grouped, labelled, read-only rows (`POST /api/settings`). Names that look like keys, serials or MACs are dropped, and strings pass through `redactString`. Nothing writes to the device.
+- `server/settings.mjs` turns `device.properties` and `device.getProperties()` into grouped, labelled rows (`POST /api/settings`). Names that look like keys, serials or MACs are dropped, and strings pass through `redactString`. Only names in `EDITABLE` that the SDK marks writable get a `control` (a switch for booleans, a select for `enumValues`); `EufyAccount.setSetting` re-validates against that control before `client.setProperty` (`POST /api/settings/set`). Never add free numeric writes: the SDK has no ranges.
+- `server/session.mjs`: "Keep me signed in". `SavedAccount` holds three `ProtectedStore`s (account email + country, the SDK `store` session, the SDK `pushStore`) in `.runtime/account/`, AES-256-GCM sealed under `key.dat`, which DPAPI protects (one PowerShell call, about 1 s, so DPAPI is never used per save). `EufyAccount.resume()` restores at startup with an empty password only when `sdk.isSessionValid` passes and treats a non-Ok login as a rejected session; `server.resumeAccount()` retries while the network comes up. `disconnect({forget:true})` is a user sign-out; a shutdown keeps the saved sign-in.
+- `server/alerts.mjs`: preferences in `.runtime/alerts.json` (in `/api/state` as `alerts`), Windows toasts through Windows PowerShell's WinRT bridge under PowerShell's AppUserModelID with a protocol launch to `/#events`. `record()` calls `alerts.notify`. When `alerts.available` is false the page plays `src/lib/chime.js`.
+- `server/history.mjs`: battery and RSSI per device key in `.runtime/history.json` (change or hourly, 60 days), fed by `sampleAll` after `refresh` and every 15 min, and by `propertyChanged` events. `GET /api/history?key=`; charted by `src/components/HistoryChart.jsx`.
+- `tools/tray.ps1` starts `server/index.mjs` hidden with `MONITOR_PARENT_PID`; the server exits when that process is gone. Keep the script ASCII (Windows PowerShell 5.1 reads BOM-less files as ANSI) and never call a native command with `$ErrorActionPreference='Stop'` and redirected stderr: esbuild writes to stderr and that throws.
 - APK evidence (`analysis/streaming/command-enums.json`, `analysis/asset-evidence/hb_capability_config.json`) is optional at startup, because the capability file is vendor data and is not in git.
 - Front end: `src/App.jsx` holds the state, `src/hooks/useMonitor.js` polls `/api/state` every 1.5 s, and components and styles are split. The design follows the eufy OneAnker tokens in monochrome (`src/styles/tokens.css`, `DESIGN.md`). Don't use the cyan brand colour, coloured status pills or a "connected" badge. Avoid the class name `.main` on components: the mobile layout reorders `.main` and it once broke the control row. The build copies MontForAnker from `analysis/ui/fonts` into `dist/fonts` when present.
-- Live view on the T8214 currently fails at runtime. The SDK picks its start by topology: `homeBaseAttached` sends 1350 wrapping `{cmd: 1003}`; the doorbell's own session sends 1700 wrapping START_LIVE 1000, then keepalive 1139. Background is in `analysis/streaming/FINDINGS.md`. The next step is reading a diagnostics and netwatch log.
+- Live view on the T8214 currently fails at runtime. The SDK picks its start by topology: `homeBaseAttached` sends 1350 wrapping `{cmd: 1003}`; the doorbell's own session sends 1700 wrapping START_LIVE 1000, then keepalive 1139. Background is in `analysis/streaming/FINDINGS.md`. The static comparison and ranked causes, with the log lines that confirm each, are in `analysis/streaming/T8214-LIVE.md`; `openVideo` passes `liveOptions(sn)` (five-minute `batteryBudgetMs`, plus `eccPrivateKey` from SDK internals with `EUFY_LIVE_ECC=1`). The next step is reading a diagnostics and netwatch log.
 
 ## UI atlas pipeline (`analysis/ui`)
 
@@ -54,6 +61,7 @@ There is no linter. CI (`.github/workflows/ci.yml`, Ubuntu) runs the build, the 
    - Per module it emits the element trees (`comps`), `exports`, `texts` (a constant table: i18n proxies `{t: key}`, enums, `#asset` image-loader entries, `@[light,dark]` DynamicValue pairs, `^alias` getters, `=literal`), `getters` (class getter tables for theme modules) and `routes` (`[name, module, export]` from exported `{name, component}` route tables).
 4. **`theme-tokens.mjs`** extracts the bc-rnuikit getter classes (`defColor`, `defFont`, radius).
 5. **`build-atlas-data.mjs`** writes `atlas/data/`: per-bundle catalogues, the asset map, language tables, native resources and `tokens.json`.
+   - It also writes `lang/<code>/<bundle>.json` + `langs.json` (38 languages from the bundles' `res/language/*.js`, English fallback; native `strings.xml` is English only), `search.json` (`{keys, entries}`, resolved per language in the browser) and the version manifest `versions/<id>.json` + `versions/index.json`. The manifest is keyed by source path, its tree hash ignores `$f` ids and component names, and it does not depend on `analysis/decoded`.
    - Asset modules map to drawables using React Native's Android resource-name rule.
    - Theme scale classes are ordered by builder function ID: the first backs `fixed`/`relative`, the second `ratio`.
    - Kinds: plain `.ts` files and `use*` hooks are logic even when named `*Screen`/`*Modal` (the `*ViewModal.ts` view models). A screen without a tree that re-exports another screen gets `alias`.
@@ -62,7 +70,8 @@ There is no linter. CI (`.github/workflows/ci.yml`, Ubuntu) runs the build, the 
 
 The viewer (`atlas/js`) is plain ES modules with no build step:
 - `rn-render.js` maps trees to DOM: RN styles become flexbox at 1 px = 1 dp; tokens resolve as `defColor.*`, `UFColor.*`, `oa.*`, `UFSpace`, `UFRadius`, `UFFont` and `oa.font`; props pass as `arg1.x` or `this.props.x`; components resolve directly or through a barrel by export or file name, and must never resolve to `App`, `Navigator` or `NavigationConfig` modules; FlatList `renderItem` gets `{item, index}`; react-native-svg renders as SVG.
-- Model branches: `createRenderer(rc, {variant})` with `all` (marked with a dotted outline), `T8214` or `other`; `renderComponent(comp, 'b<n>')` renders a separated branch tree. Pages `#/map[/<bundle>[/<index>]]` (views/map.js) and `#/t8214` (views/t8214.js).
+- Model branches: `createRenderer(rc, {variant})` with `all` (marked with a dotted outline), `T8214` or `other`; `renderComponent(comp, 'b<n>')` renders a separated branch tree. Pages `#/map[/<bundle>[/<index>]]` (views/map.js), `#/t8214` (views/t8214.js), `#/search/<q>` (views/search.js) and `#/diff[/<old>/<new>]` (views/diff.js; the logic is in `js/version-diff.js`, shared with the command-line tool).
+- The preview language lives in `data.getLanguage()` / `setLanguage()` (localStorage `atlas.lang`); `shots.mjs` takes `ATLAS_LANG=<code>`.
 - `native-render.js` renders decoded layout XML in the browser, converting vector drawables to SVG and shape drawables to CSS. Relative and Constraint layouts become stacks.
 
 The atlas chrome is monochrome; app colours appear only inside previews and swatches.

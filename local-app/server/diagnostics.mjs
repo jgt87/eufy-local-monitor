@@ -4,7 +4,7 @@
 import { mkdirSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
 
-const SECRET_KEYS = /pass(word)?|token|secret|auth|key|cookie|session_?id|private|email|account_?id|user_?id|mvaluestrsub|p2p_did|did$|dsk|init_?str|sign/i;
+const SECRET_KEYS = /pass(word)?|token|secret|auth|key|cookie|session_?id|private|email|account_?id|user_?id|mvaluestrsub|p2p_did|did$|dsk|init_?str|sign(?!_?code)/i;
 const SERIAL = /\b(T[0-9A-Z]{4})[0-9A-Z]{8,14}\b/g;             // eufy serials: keep the model prefix
 const MAC = /\b(?:[0-9A-F]{2}[:-]?){5}[0-9A-F]{2}\b/gi;
 const LONG_HEX = /\b[0-9a-f]{32,}\b/gi;

@@ -1,6 +1,7 @@
 // Screenshots atlas pages and fails on page errors.
 // Usage (from local-app, which has playwright installed):
 //   node ../analysis/ui/atlas/test/shots.mjs <outDir> "#/route" ["#/route" ...]
+// ATLAS_LANG=nl sets the preview language first (default: whatever the page remembers, else English).
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE_URL || 'playwright');
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -11,13 +12,14 @@ await fs.mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge' });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
+if (process.env.ATLAS_LANG) await page.addInitScript(l => { try { localStorage.setItem('atlas.lang', l); } catch {} }, process.env.ATLAS_LANG);
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 for (const r of routes) {
   await page.goto(base + r);
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(600);
-  const name = r.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home';
+  const name = (r.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home') + (process.env.ATLAS_LANG ? `.${process.env.ATLAS_LANG}` : '');
   const phone = await page.$('.phone');
   await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: false });
   if (phone) await phone.screenshot({ path: path.join(outDir, `${name}.phone.png`) });

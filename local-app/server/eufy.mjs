@@ -18,32 +18,51 @@ export function accountFailure(error,stage='sign-in') {
 }
 
 export class EufyAccount {
-  constructor({loadSdk = () => import('@mega-yfue/eufy-sdk'), onChange = () => {}, diag = {log() {}}, events = null, thumbnailDelayMs = 4000} = {}) {
-    this.loadSdk = loadSdk; this.onChange = onChange; this.diag = diag; this.events = events; this.thumbnailDelayMs = thumbnailDelayMs; this.status = 'signed-out'; this.devices = []; this.client = null; this.busy = false; this.challenge = null;
+  constructor({loadSdk = () => import('@mega-yfue/eufy-sdk'), onChange = () => {}, diag = {log() {}}, events = null, alerts = null, history = null, saved = null, thumbnailDelayMs = 4000, sampleMs = 900000} = {}) {
+    this.loadSdk = loadSdk; this.onChange = onChange; this.diag = diag; this.events = events; this.alerts = alerts; this.history = history; this.saved = saved; this.thumbnailDelayMs = thumbnailDelayMs; this.sampleMs = sampleMs;
+    this.status = 'signed-out'; this.devices = []; this.client = null; this.busy = false; this.challenge = null; this.remember = false; this.values = new Map(); this.sampler = null;
   }
   async available() { try { await this.loadSdk(); return true; } catch { return false; } }
-  snapshot() { return {status:this.status, devices:this.devices, challenge:this.challenge}; }
-  async login({email,password,countryCode}) {
+  snapshot() { return {status:this.status, devices:this.devices, challenge:this.challenge, remembered:this.remember && this.status==='connected'}; }
+  // Restore a saved session at startup without a password. Returns false when there is nothing usable,
+  // so no sign-in with an empty password is ever sent.
+  async resume() {
+    const remembered=this.saved?.remembered();
+    if(!remembered || this.client || this.busy) return false;
+    let sdk; try { sdk=await this.loadSdk(); } catch { return false; }
+    if(typeof sdk.isSessionValid==='function' && !sdk.isSessionValid(this.saved.session.load())) { this.onChange('The saved sign-in has expired. Sign in again.'); this.saved.forget(); return false; }
+    // A rejected session is forgotten; a network failure keeps it so a later attempt can succeed.
+    try { await this.login({...remembered,password:'',remember:true,resuming:true}); return this.status==='connected'; }
+    catch(e) { if(/needs a new password/.test(e.message)) this.saved.forget(); return false; }
+  }
+  async login({email,password,countryCode,remember=false,resuming=false}) {
     if(this.busy) throw new Error('A sign-in is already in progress.');
-    if(!email || !password || !/^[A-Z]{2}$/.test(countryCode)) throw new Error('Enter your email, password and a two-letter country code.');
+    if(!email || (!password && !resuming) || !/^[A-Z]{2}$/.test(countryCode)) throw new Error('Enter your email, password and a two-letter country code.');
     if(this.client) throw new Error('Sign out before starting another sign-in.');
     this.busy=true;
     try {
       let sdk;
       try { sdk=await this.loadSdk(); } catch { throw new Error('The Eufy SDK is missing. Run npm.cmd install in the local-app folder, then restart the app.'); }
       this.sdk=sdk;
-      this.client=new sdk.EufyMega({email,password,countryCode,...(this.diag.logger?{logger:this.diag.logger}:{})});
+      this.remember=!!(remember && this.saved);
+      if(this.saved && !resuming) this.saved.forget();
+      const stores=this.remember?{store:this.saved.session,pushStore:this.saved.push}:{};
+      this.client=new sdk.EufyMega({email,password,countryCode,...stores,...(this.diag.logger?{logger:this.diag.logger}:{})});
       this.client.on('error', e => {this.diag.log('sdk:event','client error',e);this.onChange('Eufy reported a connection error. Try refreshing the device list.');});
       this.client.on('event', e => void this.record(e).catch(err => this.diag.log('events','record failed',err)));
       this.client.on('sessionExpired', () => {this.status='expired';this.onChange('Session expired. Sign out and sign in again.');});
-      this.status='signing-in'; this.onChange('Signing in to Eufy.');
-      return await this.accept(await this.client.login());
+      this.status='signing-in'; this.onChange(resuming?'Restoring the saved sign-in.':'Signing in to Eufy.');
+      const result=await this.client.login();
+      if(resuming && result.status!==sdk.LoginStatus.Ok) throw new Error('The saved sign-in needs a new password or verification.');
+      if(this.remember) this.saved.remember({email,countryCode});
+      return await this.accept(result);
     } catch(e) {
       this.diag.log('account','sign-in failed',e);
       if(this.status==='connected')throw e;
       this.status='error';this.challenge=null;
       const old=this.client;this.client=null;
       try{await old?.disconnect();}catch{}
+      if(resuming){this.status='signed-out';this.onChange('The saved sign-in could not be restored. Sign in again.');throw e;}
       const message=/^(The Eufy SDK is missing|Eufy rejected)/.test(e.message)?e.message:accountFailure(e);
       this.onChange(message);throw new Error(message);
     } finally { this.busy=false; }
@@ -76,10 +95,39 @@ export class EufyAccount {
     this.devices=await Promise.all(records.map(async r=>{
       const d=await this.client.getDevice(r.sn); const cam=d.camera?.();
       const info={sn:r.sn,key:deviceKey(r.sn),name:r.name || r.sn,model:String(r.model || r.productCode || r.product_code || ''),codec:d.codec || '',capabilities:Array.isArray(d.capabilities)?d.capabilities:[],canLive:typeof cam?.openReadable==='function',stationSn:r.stationSn && r.stationSn!==r.sn?r.stationSn:null};
-      this.diag.log('account','device',{model:info.model,codec:info.codec,canLive:info.canLive,homeBase:!!info.stationSn,capabilities:info.capabilities,recordKeys:Object.keys(r),deviceType:r.deviceType ?? r.device_type});
+      this.diag.log('account','device',{model:info.model,codec:info.codec,canLive:info.canLive,homeBase:!!info.stationSn,capabilities:info.capabilities,recordKeys:Object.keys(r),deviceType:r.deviceType ?? r.device_type,channel:r.channel ?? r.raw?.device_channel ?? null,parentDiffers:!!(r.raw?.parent_sn && r.raw.parent_sn!==r.sn),stationDiffers:!!(r.raw?.station_sn && r.raw.station_sn!==r.sn)});
       return info;
     }));
+    await this.sampleAll();
+    if(this.history && !this.sampler){this.sampler=setInterval(()=>void this.sampleAll(),this.sampleMs);this.sampler.unref?.();}
     return this.devices;
+  }
+  // Battery and signal readings for the history chart, from the SDK's cached property values.
+  async sampleAll() {
+    if(!this.history || !this.client) return;
+    for(const d of this.devices) {
+      try { const values=(await this.client.getDevice(d.sn)).getProperties?.() || {}; this.values.set(d.sn,values); await this.history.sample(d.key,values); }
+      catch(e) { this.diag.log('history','sample failed',e); }
+    }
+  }
+  async sampleChange(e) {
+    const device=this.devices.find(d=>d.sn===e.deviceSn);
+    if(!this.history || !device || !['battery','wifiRssi','rssi'].includes(e.property)) return;
+    const values={...this.values.get(device.sn),[e.property]:e.value};this.values.set(device.sn,values);
+    await this.history.sample(device.key,values);
+  }
+  async setSetting(sn,name,value) {
+    if(this.status!=='connected' || !this.devices.some(d=>d.sn===sn)) throw new Error('Select a device on this account.');
+    const row=describeSettings(await this.client.getDevice(sn)).groups.flatMap(g=>g.rows).find(r=>r.name===name);
+    if(!row?.control) throw new Error('This setting cannot be changed here.');
+    const ok=row.control.type==='switch'?typeof value==='boolean':row.control.options.some(([v])=>v===value);
+    if(!ok) throw new Error('Choose one of the offered values.');
+    const device=this.devices.find(d=>d.sn===sn);
+    this.diag.log('settings','write',{model:device.model,name,value});
+    await this.client.setProperty(sn,name,value);
+    const shown=row.control.type==='switch'?(value?'On':'Off'):row.control.options.find(([v])=>v===value)[1];
+    this.onChange(`${row.label} set to ${shown} on ${device.name}.`);
+    return {name,value,label:row.label,shown};
   }
   async openVideo(sn) {
     if(this.status!=='connected') throw new Error('Sign in before opening a camera.');
@@ -89,19 +137,42 @@ export class EufyAccount {
     this.diag.log('media','openReadable start',{model:this.devices.find(x=>x.sn===sn)?.model});
     const started=Date.now();
     let input;
-    try{input=await camera.openReadable();}catch(e){this.diag.log('media','openReadable failed',{ms:Date.now()-started,error:e});throw e;}
+    try{input=await camera.openReadable(await this.liveOptions(sn));}catch(e){this.diag.log('media','openReadable failed',{ms:Date.now()-started,error:e});throw e;}
     this.diag.log('media','openReadable returned',{ms:Date.now()-started,ok:!!input});
     if(!input) throw new Error('The camera did not open a media stream.');
     return input;
   }
+  // Options for the SDK's live pull. On a battery camera the SDK ends the pull 45 s (+10 s grace) after the
+  // first keyframe unless the budget is raised; the page allows five minutes. With EUFY_LIVE_ECC=1 it also
+  // looks up the ECC private key of the cipher the P2P session negotiated, so the SDK can decode E2E frames
+  // (ECIES envelope + AES-GCM), which it otherwise drops. The key only reaches the SDK's fallback decoder.
+  // This reads SDK internals (p2p router, session cipher id) and degrades to the plain options when absent.
+  async liveOptions(sn) {
+    const opts={batteryBudgetMs:5*60*1000};
+    if(process.env.EUFY_LIVE_ECC!=='1') return opts;
+    try {
+      const router=this.client?.p2p;
+      if(typeof router?.resolveSession!=='function' || typeof router?.cipherKeysFor!=='function') {this.diag.log('media','ecc lookup: SDK internals not found');return opts;}
+      const {session,parentSn,accountId}=await router.resolveSession(sn,{waitLevel2:'settle'});
+      const cipherId=session?.gatewayCipherId;
+      if(!Number.isInteger(cipherId) || cipherId===0) {this.diag.log('media','ecc lookup: no cipher on session',{cipherId:cipherId ?? null});return opts;}
+      const keys=await router.cipherKeysFor(session,cipherId,accountId,parentSn);
+      const ecc=typeof keys?.ecc==='string' && /^[0-9a-f]{64}$/i.test(keys.ecc) ? Buffer.from(keys.ecc,'hex') : null;
+      this.diag.log('media','ecc lookup',{cipherId,found:!!ecc});
+      if(ecc) opts.eccPrivateKey=ecc;
+    } catch(e) { this.diag.log('media','ecc lookup failed',e); }
+    return opts;
+  }
   // A semantic event from push or P2P. Only detections are kept; the push thumbnail is read from the
   // SDK's retained snapshot a few seconds later, because it is fetched after the event itself arrives.
   async record(e) {
+    if(e?.eventName==='propertyChanged') { await this.sampleChange(e); return null; }
     if(!this.events || !EVENT_LABELS[e?.eventName]) return null;
     const device=this.devices.find(d=>d.sn===e.deviceSn) || this.devices.find(d=>d.sn===e.stationSn) || {};
     const event=await this.events.add({kind:e.eventName,device});
     this.diag.log('events','event',{kind:e.eventName,model:device.model,eventType:e.eventType,thumbnail:!!e.thumbnailUrl});
     this.onChange(`${event.label}: ${event.deviceName}.`);
+    if(this.alerts) void this.alerts.notify(event).catch(err=>this.diag.log('alerts','notify failed',err));
     if(device.sn) setTimeout(()=>void this.fetchThumbnail(device.sn,event.id),this.thumbnailDelayMs).unref?.();
     return event;
   }
@@ -125,8 +196,11 @@ export class EufyAccount {
     this.diag.log('settings','read',{model:this.devices.find(d=>d.sn===sn)?.model,reported:result.reported,capabilities:result.capabilities});
     return result;
   }
-  async disconnect() {
+  // forget: the user signed out, so the saved sign-in goes too. A shutdown keeps it.
+  async disconnect({forget=false}={}) {
     if(this.busy) throw new Error('Wait for the current sign-in or verification request to finish.');
+    if(forget){this.saved?.forget();this.remember=false;}
+    clearInterval(this.sampler);this.sampler=null;this.values.clear();
     const old=this.client; this.client=null;this.status='signed-out';this.devices=[];this.challenge=null;
     if(old) await old.disconnect();
     this.onChange('Signed out.');

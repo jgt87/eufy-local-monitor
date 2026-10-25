@@ -32,10 +32,27 @@ jobs:
         run: npm run build
       - name: Unit tests
         run: npm test
+      # Playwright's own Chromium has no H.264 decoder, so the test signal is played in Google Chrome.
+      - name: Install Chrome for the browser test
+        run: npx playwright install --with-deps chrome
+      - name: Browser test
+        run: |
+          PORT=4288 node server/index.mjs > monitor.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4288/api/state > /dev/null && break; sleep 1; done
+          PLAYWRIGHT_CHANNEL=chrome MONITOR_URL=http://127.0.0.1:4288 node test/browser.mjs
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-screenshots
+          path: |
+            local-app/test/screenshots/
+            local-app/monitor.log
+          if-no-files-found: ignore
       - name: No vendor material tracked
         working-directory: .
         run: |
-          if git ls-files | grep -Ei '\.(apk|so|hbc|ttf|otf|dex)$|^APKDownload/|^analysis/(decoded|decompiled|asset-evidence)/|^analysis/ui/(rn|modules|trees|fonts|atlas/data)/'; then
+          if git ls-files | grep -Ei '\.(apk|so|hbc|ttf|otf|dex)$|^APKDownload/|^analysis/(decoded|decompiled|asset-evidence)/|^analysis/ui/(rn|modules|trees|fonts|versions|atlas/data)/'; then
             echo "Vendor material is tracked; remove it from git." >&2
             exit 1
           fi

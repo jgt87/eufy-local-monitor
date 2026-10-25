@@ -9,7 +9,8 @@ import { nativeListView, nativeLayoutView } from './views/native.js';
 import { assetsView } from './views/assets.js';
 import { mapView } from './views/map.js';
 import { t8214View } from './views/t8214.js';
-import { initSearch } from './views/search.js';
+import { initSearch, searchView, languageLabel } from './views/search.js';
+import { diffView } from './views/diff.js';
 
 export const BUNDLE_TITLES = {
   SEC_SETTING: 'Device settings', SEC_ADDDEVICE: 'Add device / onboarding', MEGA_PLAYER: 'Player and playback',
@@ -27,6 +28,8 @@ async function buildNav() {
     h('a', { href: '#/tokens' }, 'Design tokens'),
     h('a', { href: '#/native' }, 'Native layouts'),
     h('a', { href: '#/map' }, 'Screen map'),
+    h('a', { href: '#/search' }, 'Text search'),
+    h('a', { href: '#/diff' }, 'Compare versions'),
     h('a', { href: '#/t8214' }, h('span', {}, 'T8214 variants'), h('small', {}, list.reduce((n, b) => n + (b.t8214 || 0), 0))),
     h('div', { class: 'nav-head' }, 'React Native bundles'),
     ...list.map(b => h('a', { href: `#/b/${b.bundle}` }, h('span', {}, BUNDLE_TITLES[b.bundle] || b.bundle), h('small', {}, b.screens + b.modals || b.components))),
@@ -55,6 +58,8 @@ async function route() {
     else if (parts[0] === 'assets' && parts[1]) node = await assetsView(parts[1]);
     else if (parts[0] === 'map') node = await mapView(parts[1], parts[2] !== undefined ? Number(parts[2]) : undefined);
     else if (parts[0] === 't8214') node = await t8214View();
+    else if (parts[0] === 'search') node = await searchView(parts.slice(1).join('/'));
+    else if (parts[0] === 'diff') node = await diffView(parts[1], parts[2]);
     else if (parts[0] === 'b' && parts[2] !== undefined) node = await screenView(parts[1], Number(parts[2]));
     else if (parts[0] === 'b' && parts[1]) node = await bundleView(parts[1]);
     else node = h('p', {}, 'Unknown page.');
@@ -69,4 +74,15 @@ async function route() {
 window.addEventListener('hashchange', route);
 buildNav().catch(err => nav.append(errorBox(err)));
 initSearch(document.getElementById('search'), document.getElementById('search-results'));
-route();
+
+// Preview language: views re-render in the chosen language; the choice is kept in localStorage.
+async function initLanguage(select) {
+  const list = await data.langs().catch(() => [{ code: 'en', keys: 0, translated: 0 }]);
+  if (!list.some(l => l.code === data.getLanguage())) data.setLanguage('en');
+  const en = list.find(l => l.code === 'en')?.keys || 1;
+  clear(select).append(...list.map(l => h('option', { value: l.code, selected: l.code === data.getLanguage() },
+    `${languageLabel(l.code)}${l.code === 'en' ? '' : ` · ${Math.round(100 * l.translated / en)}%`}`)));
+  select.addEventListener('change', () => { data.setLanguage(select.value); route(); });
+}
+const langReady = initLanguage(document.getElementById('lang')).catch(err => console.error(err));
+langReady.then(route);

@@ -121,6 +121,40 @@ button.cell:hover, summary.cell:hover { background: var(--fill); }
 .settings-intro { display: flex; align-items: center; gap: var(--s-m); }
 .settings .fine-print { margin: 0; padding: 0 var(--s-l); }
 
+/* ---------- switches, alerts and editable settings ---------- */
+.switch { position: relative; flex-shrink: 0; width: 46px; height: 28px; padding: 0; border: 0; border-radius: var(--r-pill); background: var(--fill-strong); transition: background .15s; }
+.switch span { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .15s; }
+.switch[aria-checked="true"] { background: var(--ink); }
+.switch[aria-checked="true"] span { transform: translateX(18px); background: var(--card); }
+.switch:disabled { opacity: .45; }
+.switch:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.cell.sub { padding-left: var(--s-xxl); min-height: 48px; }
+.cell.sub .cell-copy strong { font-size: var(--f-body); }
+.chevron { flex-shrink: 0; color: var(--ink-3); transition: transform .15s; }
+.chevron.open { transform: rotate(90deg); }
+.remember-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-m); margin-top: var(--s-s); font-size: var(--f-body); color: var(--ink-2); }
+.setting-row + .setting-row { box-shadow: inset 0 1px 0 var(--line); }
+.cell-select { width: auto; max-width: 55%; margin-left: auto; }
+.confirm-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-s); padding: 0 var(--s-l) var(--s-m); font-size: var(--f-body); color: var(--ink-2); }
+.confirm-row span { flex: 1 1 200px; }
+.error-text { color: var(--error-ink) !important; }
+
+/* ---------- battery and signal charts ---------- */
+.charts { display: grid; gap: var(--s-xl); }
+.chart { position: relative; min-width: 0; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--s-xs); }
+.chart-head span { color: var(--ink-3); font-size: var(--f-body); font-variant-numeric: tabular-nums; }
+.chart svg { display: block; touch-action: pan-y; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .crosshair { stroke: var(--ink-4); stroke-width: 1; }
+.chart .marker { fill: var(--ink); stroke: var(--card); stroke-width: 2; }
+.chart-tip { position: absolute; top: 24px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; padding: 6px 10px; border-radius: var(--r-s); background: var(--ink); color: var(--on-ink); font-size: var(--f-caption2); white-space: nowrap; pointer-events: none; }
+.chart-empty { margin: 0; color: var(--ink-3); font-size: var(--f-body); }
+.chart-table summary { cursor: pointer; color: var(--ink-2); font-size: var(--f-caption2); margin-top: var(--s-xs); }
+.chart-table th, .chart-table td { padding: 8px var(--s-m); }
+
 /* ---------- messages ---------- */
 .error-banner { display: flex; align-items: flex-start; gap: var(--s-m); padding: var(--s-m) var(--s-l); border-radius: var(--r-l); background: var(--error-fill); color: var(--error-ink); }
 .error-banner svg { flex-shrink: 0; }

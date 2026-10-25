@@ -1,31 +1,44 @@
 // Turns the recovered module tables and decoded native resources into the JSON the
 // UI atlas reads. Paths in the output are relative to analysis/ (the atlas server root).
-// Usage: node build-atlas-data.mjs <analysis-dir>
+// Usage: node build-atlas-data.mjs <analysis-dir> [--ui <work dir with rn/modules/trees>] [--apk <APK dir>]
+//   [--version <label>] [--res <decoded res dir> | none]
+// The main build (--ui = analysis/ui) writes ui/atlas/data; every build adds ui/atlas/data/versions/<version>.json.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { apkVersion } from './apk-version.mjs';
 
-const root = path.resolve(process.argv[2]);
-const rnDir = path.join(root, 'ui/rn'), modDir = path.join(root, 'ui/modules');
-const resDir = path.join(root, 'decoded/resources/res');
-const outDir = path.join(root, 'ui/atlas/data');
-fs.mkdirSync(path.join(outDir, 'bundles'), { recursive: true });
-fs.mkdirSync(path.join(outDir, 'lang'), { recursive: true });
+const argv = process.argv.slice(2);
+const opt = n => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : undefined; };
+const root = path.resolve(argv[0]);
+const ui = path.resolve(opt('ui') ?? path.join(root, 'ui'));
+const primary = ui === path.join(root, 'ui');
+const rnDir = path.join(ui, 'rn'), modDir = path.join(ui, 'modules'), treeDir = path.join(ui, 'trees');
+const resDir = opt('res') === 'none' ? null : path.resolve(opt('res') ?? path.join(root, 'decoded/resources/res'));
+const apkDir = path.resolve(opt('apk') ?? path.join(root, '../APKDownload'));
+const ver = apkVersion(apkDir, opt('version'));
+const outDir = path.join(ui, 'atlas/data');
+const versionsDir = path.join(root, 'ui/atlas/data/versions');
+for (const d of ['bundles', 'lang', 'assets']) fs.mkdirSync(path.join(outDir, d), { recursive: true });
+fs.mkdirSync(versionsDir, { recursive: true });
 const rel = p => path.relative(root, p).split(path.sep).join('/');
 const write = (name, data) => fs.writeFileSync(path.join(outDir, name), JSON.stringify(data));
+const hasRes = resDir && fs.existsSync(resDir);
+if (!hasRes) console.log('No decoded native resources: native strings, colours, drawables and layouts are left empty.');
 
 // ---------- native values ----------
 const decodeXml = s => s.replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 function readValues(file, tag) {
   const out = {};
-  if (!fs.existsSync(file)) return out;
+  if (!hasRes || !fs.existsSync(file)) return out;
   const re = new RegExp(`<${tag} name="([^"]+)"[^>]*>([\\s\\S]*?)</${tag}>`, 'g');
   for (const m of fs.readFileSync(file, 'utf8').matchAll(re)) out[m[1]] = decodeXml(m[2].trim());
   return out;
 }
-const nativeStrings = readValues(path.join(resDir, 'values/strings.xml'), 'string');
-const colorsDay = readValues(path.join(resDir, 'values/colors.xml'), 'color');
-const colorsNight = { ...colorsDay, ...readValues(path.join(resDir, 'values-night/colors.xml'), 'color') };
-const dimens = readValues(path.join(resDir, 'values/dimens.xml'), 'dimen');
+const nativeStrings = readValues(path.join(resDir || '.', 'values/strings.xml'), 'string');
+const colorsDay = readValues(path.join(resDir || '.', 'values/colors.xml'), 'color');
+const colorsNight = { ...colorsDay, ...readValues(path.join(resDir || '.', 'values-night/colors.xml'), 'color') };
+const dimens = readValues(path.join(resDir || '.', 'values/dimens.xml'), 'dimen');
 function resolveRefs(table) {
   const out = {};
   for (const k of Object.keys(table)) {
@@ -42,7 +55,7 @@ write('native-dimens.json', dimens);
 // Native drawables: prefer raster at xxhdpi, otherwise the XML (vector/shape/selector).
 const dpiRank = d => ['drawable-xxhdpi', 'drawable-xxxhdpi', 'drawable-xhdpi', 'drawable-hdpi', 'drawable', 'drawable-nodpi', 'drawable-anydpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi'].indexOf(d);
 const drawables = {}, drawablesNight = {};
-for (const d of fs.readdirSync(resDir).filter(d => /^(drawable|mipmap)/.test(d))) {
+for (const d of hasRes ? fs.readdirSync(resDir).filter(d => /^(drawable|mipmap)/.test(d)) : []) {
   const rank = dpiRank(d), night = d.includes('night');
   if (rank < 0 && !night) continue;
   const target = night ? drawablesNight : drawables;
@@ -55,7 +68,7 @@ for (const d of fs.readdirSync(resDir).filter(d => /^(drawable|mipmap)/.test(d))
 const flat = t => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v.path]));
 write('native-drawables.json', { day: flat(drawables), night: flat(drawablesNight) });
 
-const layoutNames = fs.readdirSync(path.join(resDir, 'layout')).map(f => f.replace(/\.xml$/, '')).sort();
+const layoutNames = hasRes ? fs.readdirSync(path.join(resDir, 'layout')).map(f => f.replace(/\.xml$/, '')).sort() : [];
 write('native-layouts.json', layoutNames);
 
 // ---------- RN bundles ----------
@@ -72,7 +85,7 @@ for (const b of fs.readdirSync(rnDir)) {
       const name = f.replace(/\.[^.]+$/, '');
       const score = (d === 'drawable-xxhdpi' ? 0 : d === 'drawable-xhdpi' ? 1 : 2);
       const list = (drawableIndex[name] ||= []);
-      list.push({ bundle: b, score, path: `ui/rn/${b}/${d}/${f}` });
+      list.push({ bundle: b, score, path: rel(path.join(rnDir, b, d, f)) });
     }
   }
 }
@@ -82,17 +95,60 @@ function findDrawable(name, bundle) {
   return [...list].sort((a, b) => (a.bundle !== bundle) - (b.bundle !== bundle) || a.score - b.score)[0].path;
 }
 
+// Language tables per bundle (res/language/<code>.js). Regional files fill in for the plain code
+// (de-DE -> de) only where the bundle has no file of that code.
+const LANG_ALIAS = { 'de-DE': 'de', 'tr-TR': 'tr', 'es-LA': 'es', 'zh-TW': 'zh-Hant', 'pt-BR': 'pt', 'pt-PT': 'pt', 'ja-JP': 'ja', 'he-IL': 'he' };
+function langTables(modules) {
+  const parts = {}, out = {};
+  for (const m of modules) {
+    const x = /_language_([a-z]{2,3}(?:-[A-Za-z]{2,4})?)\.(js|ts|json)$/.exec(m.path);
+    if (x) (parts[LANG_ALIAS[x[1]] || x[1]] ||= []).push([!LANG_ALIAS[x[1]], m.objects]);
+  }
+  for (const [code, list] of Object.entries(parts)) {
+    out[code] = {};
+    for (const [, objs] of list.sort((a, b) => a[0] - b[0])) for (const o of objs) Object.assign(out[code], o);
+  }
+  return out;
+}
+const readJson = p => JSON.parse(fs.readFileSync(p, 'utf8'));
+const sdkTreeMods = new Map(readJson(path.join(treeDir, 'zx-rnsdk.json')).modules.map(m => [m.path, m]));
+const sdkLang = langTables(readJson(path.join(modDir, 'zx-rnsdk.json')).modules).en ?? {};
+// Text keys a tree displays (translate() keys and i18n proxy entries), model-branch labels, and a
+// tree hash that ignores function ids and minified component names, so it compares across builds.
+const plainKey = x => typeof x === 'string' && x !== '' && !/^[#@=^]/.test(x);
+function treeInfo(tm, treeMods) {
+  const keys = new Set(), labels = new Set();
+  const walk = v => {
+    if (!v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    if (typeof v.$t === 'string') keys.add(v.$t);
+    if (typeof v.$m === 'string' && Array.isArray(v.$p)) { const x = (treeMods.get(v.$m) ?? sdkTreeMods.get(v.$m))?.texts?.[v.$p.join('.')]; if (plainKey(x)) keys.add(x); }
+    if (Array.isArray(v.$c)) for (const l of v.$c) labels.add(l);
+    for (const x of Object.values(v)) walk(x);
+  };
+  walk(tm?.comps);
+  const hash = tm?.comps.length ? crypto.createHash('sha1').update(JSON.stringify(tm.comps.map(c => [c.trees, c.branches ?? null]), (k, x) => (k === '$f' ? 0 : x))).digest('hex').slice(0, 12) : null;
+  return { keys, labels: [...labels].sort(), hash };
+}
+
 const fontSizes = {}, radii = {}, colorUse = {};
-const bundleIndex = [];
+const bundleIndex = [], langStats = {}, searchKeys = new Map(), searchEntries = [];
+const manifest = { id: ver.id, version: ver.version, build: ver.build, source: path.basename(apkDir), built: new Date().toISOString(), counts: {}, bundles: {} };
 const sdkUiPrefixes = ['node_modules_bc-rnuikit_lib_', 'node_modules_zx-rnsdk_lib_'];
 for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort()) {
   const bundle = file.replace(/\.json$/, '');
-  const { modules } = JSON.parse(fs.readFileSync(path.join(modDir, file), 'utf8'));
+  const { modules } = readJson(path.join(modDir, file));
   const byPath = new Map(modules.map(m => [m.path, m]));
-  const treeMods = new Map(JSON.parse(fs.readFileSync(path.join(root, 'ui/trees', file), 'utf8')).modules.map(m => [m.path, m]));
+  const treeMods = new Map(readJson(path.join(treeDir, file)).modules.map(m => [m.path, m]));
 
-  const lang = {};
-  for (const m of modules.filter(m => /_language_en\.(js|ts|json)$/.test(m.path))) for (const o of m.objects) Object.assign(lang, o);
+  const langs = langTables(modules);
+  const lang = langs.en ?? {};
+  for (const [code, table] of Object.entries(langs)) {
+    const s = (langStats[code] ||= { code, keys: 0, translated: 0, bundles: 0 });
+    s.keys += Object.keys(table).length; s.bundles++;
+    s.translated += Object.entries(table).filter(([k, v]) => code === 'en' || v !== lang[k]).length;
+    if (code !== 'en') { fs.mkdirSync(path.join(outDir, 'lang', code), { recursive: true }); write(`lang/${code}/${bundle}.json`, table); }
+  }
 
   const assets = {};
   for (const m of modules.filter(m => isAsset(m.path))) {
@@ -133,6 +189,7 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
   const keyModules = new Set(appMods.filter(m => /_NavigationKeys\.tsx?$/.test(m.path)).map(m => m.path));
   for (const k of keyModules) registries.add(k);
 
+  const extra = [];
   const out = appMods.map((m, i) => {
     const short = m.path.slice(prefix.length);
     const base = short.split('_').pop();
@@ -175,6 +232,11 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
     // elements recovered inside a T8214 branch.
     const refs = [...new Set(m.strings.filter(s => /T8214/i.test(s) && s.length < 60))];
     const branchEls = tm ? tm.comps.reduce((n, c) => n + (JSON.stringify(c.trees).match(/"\$c":/g) || []).length + (c.branches?.length || 0), 0) : 0;
+    // Manifest and search: keys from the tree plus strings of the module that are RN language keys.
+    const ti = treeInfo(tm, treeMods);
+    for (const s of m.strings) if (/[_.\s]/.test(s) && s.length < 200 && (Object.hasOwn(lang, s) || Object.hasOwn(sdkLang, s))) ti.keys.add(s);
+    const shortOf = p => (p.startsWith(prefix) ? p.slice(prefix.length) : p);
+    extra.push({ ...ti, keys: [...ti.keys].sort(), routes: (tm?.routes ?? []).map(([name, target]) => [name, shortOf(target)]) });
     return { p: short, kind, fns: m.functions, deps, navigates, text, images, colors: [...colors], styles: styles.slice(0, 80), alias, registry: registries.has(m.path) || undefined, t8214: refs.length ? { refs, branches: branchEls } : undefined };
   });
   // T8214 references reached through the screen's own logic files (view models, hooks in the same
@@ -188,6 +250,23 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
   });
   write(`bundles/${bundle}.json`, { bundle, prefix, modules: out });
   write(`lang/${bundle}.json`, lang);
+  // Version manifest (keyed by source path, which stays stable across builds) and the text search index.
+  const mods = {};
+  const keyId = k => { if (!searchKeys.has(k)) searchKeys.set(k, searchKeys.size); return searchKeys.get(k); };
+  out.forEach((m, i) => {
+    if (m.kind === 'logic') return;
+    const x = extra[i], t = m.t8214, e = { kind: m.kind, hash: x.hash };
+    if (x.keys.length) e.texts = x.keys;
+    if (m.navigates.length) e.navigates = m.navigates.map(d => out[d].p).sort();
+    if (x.routes.length) e.routes = x.routes;
+    if (m.alias !== undefined) e.alias = out[m.alias].p;
+    if (t) e.t8214 = { refs: t.refs, branches: t.branches, ...(t.via ? { via: t.via.map(d => out[d].p) } : {}), ...(x.labels.length ? { labels: x.labels } : {}) };
+    mods[m.p] = e;
+    const keys = new Set([...x.keys, ...m.text.map(([k]) => k)]);
+    searchEntries.push([bundle, i, m.p, m.kind, [...keys].map(keyId), m.deps.filter(d => out[d].kind === 'component')]);
+  });
+  manifest.bundles[bundle] = { prefix, modules: mods, strings: lang };
+  for (const k of ['screen', 'modal', 'component']) manifest.counts[k] = (manifest.counts[k] || 0) + out.filter(m => m.kind === k).length;
   bundleIndex.push({
     bundle, prefix, modules: out.length,
     screens: out.filter(m => m.kind === 'screen').length, modals: out.filter(m => m.kind === 'modal').length,
@@ -198,29 +277,38 @@ for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort(
 }
 write('bundles.json', bundleIndex);
 
-// ---------- asset maps and search index ----------
-fs.mkdirSync(path.join(outDir, 'assets'), { recursive: true });
-const search = [];
+// ---------- asset maps, search index, languages, version manifest ----------
 for (const file of fs.readdirSync(modDir).filter(f => f.endsWith('.json')).sort()) {
   const bundle = file.replace(/\.json$/, '');
-  const { modules } = JSON.parse(fs.readFileSync(path.join(modDir, file), 'utf8'));
+  const { modules } = readJson(path.join(modDir, file));
   const map = {};
   for (const m of modules.filter(m => isAsset(m.path))) {
     const rec = m.objects.find(o => o.__packager_asset);
     if (rec) map[m.path] = { name: rec.name, w: rec.width, h: rec.height, src: findDrawable(androidResName(rec.httpServerLocation, rec.name), bundle) };
   }
   write(`assets/${bundle}.json`, map);
-  const cat = JSON.parse(fs.readFileSync(path.join(outDir, `bundles/${bundle}.json`), 'utf8'));
-  cat.modules.forEach((m, i) => { if (m.kind !== 'logic') search.push([bundle, i, m.p, m.kind]); });
 }
-write('search.json', search);
+// search.json: entries [bundle, index, path, kind, key ids, direct child components (indexes)]; the
+// browser resolves the keys in the chosen language.
+write('search.json', { keys: [...searchKeys.keys()], entries: searchEntries });
+const langList = Object.values(langStats).sort((a, b) => (b.code === 'en') - (a.code === 'en') || a.code.localeCompare(b.code));
+write('langs.json', langList);
+fs.writeFileSync(path.join(versionsDir, `${ver.id}.json`), JSON.stringify(manifest));
+const indexFile = path.join(versionsDir, 'index.json');
+const previous = fs.existsSync(indexFile) ? readJson(indexFile) : {};
+const versions = fs.readdirSync(versionsDir).filter(f => f.endsWith('.json') && f !== 'index.json').map(f => {
+  const { id, version, build, source, built, counts } = readJson(path.join(versionsDir, f));
+  return { id, version, build, source, built, counts };
+}).sort((a, b) => (a.build ?? 0) - (b.build ?? 0) || a.id.localeCompare(b.id));
+fs.writeFileSync(indexFile, JSON.stringify({ current: primary ? ver.id : previous.current ?? null, versions }));
+console.log(`Languages: ${langList.map(l => l.code).join(' ')}. Manifest ${rel(path.join(versionsDir, `${ver.id}.json`))} (${versions.length} version${versions.length === 1 ? '' : 's'}).`);
 
 // ---------- design tokens ----------
 // Colour tokens come from the bc-rnuikit getter classes (theme-tokens.mjs output). Each getter passes
 // {fixedFG, darkFG, fixedBG, darkBG}; refs point at env7 (light palette), env8 (dark palette),
 // env12/env13 (the fixed/dynamic token objects themselves).
-const sdkTrees = JSON.parse(fs.readFileSync(path.join(root, 'ui/trees/zx-rnsdk.json'), 'utf8')).modules;
-const themeClasses = JSON.parse(fs.readFileSync(path.join(root, 'ui/trees/zx-rnsdk.theme.json'), 'utf8'));
+const sdkTrees = readJson(path.join(treeDir, 'zx-rnsdk.json')).modules;
+const themeClasses = readJson(path.join(treeDir, 'zx-rnsdk.theme.json'));
 const bcTheme = sdkTrees.find(m => m.path.endsWith('BCColor.ts'))?.theme?.color ?? {};
 const palettes = { env7: bcTheme.colorsLight ?? {}, env8: bcTheme.colorsDark ?? {} };
 const groupOf = keys => keys.includes('darker') ? 'mono' : keys.includes('focus') ? 'state' : keys.includes('appDefault') ? 'scene' : null;
