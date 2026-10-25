@@ -1,0 +1,16 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 400 var(--f-body)/1.5 var(--font); -webkit-font-smoothing: antialiased; font-synthesis: none; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .4; }
+a { color: inherit; }
+h1, h2, h3 { margin: 0; font-weight: 600; }
+code { font-family: "Cascadia Code", Consolas, monospace; font-size: .86em; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+input, select { width: 100%; min-width: 0; padding: 11px 14px; border: 0; border-radius: var(--r-m); background: var(--fill); color: var(--ink); font-size: var(--f-body); }
+input::placeholder { color: var(--ink-3); }
+input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: 0; }
+label { font-size: var(--f-caption2); color: var(--ink-2); margin-top: var(--s-s); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

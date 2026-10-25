@@ -1,0 +1,45 @@
+/* Design tokens taken from the eufy app's OneAnker system (analysis/ui/atlas, Design tokens).
+   Ink, page and container colours are the app's own neutral tokens; the cyan brand colour is
+   deliberately not used, so accents stay monochrome. */
+@font-face { font-family: "MontForAnker"; src: url("/fonts/MontForAnker-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "MontForAnker"; src: url("/fonts/MontForAnker-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "MontForAnker"; src: url("/fonts/MontForAnker-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+
+:root {
+  /* oa.bg / oa.fg / oa.fill (light) */
+  --page: #f3f7fb;              /* oa.bg.primary */
+  --card: #ffffff;              /* oa.bg.secondary */
+  --ink: #000f16;               /* oa.fg.primary */
+  --ink-2: rgba(0, 15, 22, .66);/* oa.fg.secondary */
+  --ink-3: rgba(0, 15, 22, .44);/* oa.fg.tertiary */
+  --ink-4: rgba(0, 15, 22, .24);/* oa.fg.quaternary */
+  --fill: rgba(0, 15, 22, .08); /* oa.fill.secondary */
+  --fill-strong: rgba(0, 15, 22, .1);
+  --line: rgba(0, 15, 22, .08);
+  --on-ink: #ffffff;
+  --stage: #141414;             /* oa.bg.primaryNeu (dark) */
+  --stage-ink: rgba(255, 255, 255, .84);
+  --stage-ink-2: rgba(255, 255, 255, .44);
+  --error-ink: #b2382f;
+  --error-fill: rgba(240, 80, 73, .12); /* oa.deco.red.lv3 family */
+
+  /* oa.radius */
+  --r-s: 10px; --r-m: 12px; --r-l: 16px; --r-group: 24px; --r-pill: 1000px;
+  /* oa.padding / oa.gap */
+  --s-xxs: 2px; --s-xs: 4px; --s-s: 8px; --s-m: 12px; --s-l: 16px; --s-xl: 20px; --s-xxl: 24px;
+  /* oa.font standard brand: caption1 10, caption2 12, body 14, title1 16, title2 18, display 20, display2 28 */
+  --f-caption1: 10px; --f-caption2: 12px; --f-body: 14px; --f-title1: 16px; --f-title2: 18px; --f-display: 20px; --f-display2: 28px;
+  --font: "MontForAnker", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* UFSpace / list cell metrics */
+  --cell-h: 60px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #000000; --card: #1a1e1f; --ink: #ffffff; --ink-2: rgba(255, 255, 255, .66); --ink-3: rgba(255, 255, 255, .44);
+    --ink-4: rgba(255, 255, 255, .24); --fill: rgba(255, 255, 255, .1); --fill-strong: rgba(255, 255, 255, .14); --line: rgba(255, 255, 255, .1);
+    --on-ink: #000f16; --stage: #0b0d0e; --error-ink: #f08a84; --error-fill: rgba(219, 89, 83, .18);
+    color-scheme: dark;
+  }
+}

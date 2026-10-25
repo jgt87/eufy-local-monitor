@@ -1,0 +1,76 @@
+/* Phone frame and the primitives used by the RN and native renderers. 1 CSS px = 1 dp. */
+@font-face { font-family: "MontForAnker-Regular"; src: url("../../fonts/MontForAnker-Regular.ttf") format("truetype"); }
+@font-face { font-family: "MontForAnker-SemiBold"; src: url("../../fonts/MontForAnker-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "MontForAnker-Bold"; src: url("../../fonts/MontForAnker-Bold.ttf") format("truetype"); }
+@font-face { font-family: "MontForAnker-Heavy"; src: url("../../fonts/MontForAnker-Heavy.ttf") format("truetype"); }
+@font-face { font-family: "Mont-SemiBold"; src: url("../../fonts/MontForAnker-SemiBold.ttf") format("truetype"); }
+
+.phone { width: 384px; padding: 12px; border-radius: 34px; background: #1d1d1f; box-shadow: 0 0 0 1px #000, 0 12px 40px rgba(0,0,0,.25); }
+.phone-screen { width: 360px; height: 760px; overflow: auto; border-radius: 24px; background: #f4f4f1; position: relative; scrollbar-width: thin; }
+.phone-screen.native { background: #fff; }
+.phone-empty { color: #aaa; padding: 40px 24px; text-align: center; }
+
+/* ---------- RN ---------- */
+.rn-root { min-height: 100%; display: flex; flex-direction: column; font-family: "MontForAnker-Regular", sans-serif; font-size: 14px; color: #333; }
+.rn-root.dark { color: #f7f7f9; background: #000; }
+.rn-root, .rn-root * { box-sizing: border-box; }
+.rn-view, .rn-comp, .rn-unknown, .rn-list, .rn-scroll { display: flex; flex-direction: column; position: relative; flex-shrink: 0; min-width: 0; }
+.rn-comp { display: contents; }
+.rn-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; flex-shrink: 1; }
+.rn-text-inline { white-space: pre-wrap; }
+.rn-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-var { font-family: Consolas, monospace; font-size: .85em; opacity: .6; background: rgba(127,127,127,.15); border-radius: 3px; padding: 0 3px; }
+.rn-image { flex-shrink: 0; background: center / contain no-repeat; }
+.rn-image-bg { background: center / cover no-repeat; }
+.rn-tinted { -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+.rn-image-missing { background: rgba(127,127,127,.08); outline: 1px dashed rgba(127,127,127,.35); outline-offset: -1px; min-width: 16px; min-height: 16px; }
+.rn-unknown { outline: 1px dashed rgba(127,127,127,.55); outline-offset: -1px; min-height: 22px; }
+.rn-unknown-label { font: 10px/1.4 Consolas, monospace; color: #888; padding: 1px 4px; align-self: flex-start; background: rgba(127,127,127,.12); border-radius: 0 0 4px 0; }
+.rn-input { border-bottom: 1px solid rgba(127,127,127,.4); padding: 8px 0; color: #999; min-height: 36px; }
+.rn-switch { width: 46px; height: 28px; border-radius: 14px; background: var(--off); position: relative; flex-shrink: 0; align-self: center; }
+.rn-switch span { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.rn-switch.on { background: var(--on); }
+.rn-switch.on span { left: 21px; }
+.rn-spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(127,127,127,.3); border-top-color: currentColor; align-self: center; animation: rn-spin 1s linear infinite; }
+@keyframes rn-spin { to { transform: rotate(360deg); } }
+.rn-list-item.sample + .rn-list-item.sample { opacity: .55; }
+.rn-list-empty { padding: 14px; font: 11px Consolas, monospace; color: #999; text-align: center; border: 1px dashed rgba(127,127,127,.4); margin: 8px; }
+.rn-modal { position: relative; margin: 12px; border-radius: 12px; outline: 1px dashed rgba(127,127,127,.5); display: flex; flex-direction: column; }
+.rn-node { cursor: pointer; }
+.rn-node:hover { box-shadow: inset 0 0 0 1px rgba(127,127,127,.55); }
+.rn-selected { box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 4px #000 !important; }
+
+/* ---------- native ---------- */
+.nv-root { min-height: 100%; display: flex; flex-direction: column; font-family: "MontForAnker-Regular", sans-serif; font-size: 14px; color: #333; }
+.nv-root.dark { background: #000; color: #eee; }
+.nv-root * { box-sizing: border-box; }
+.nv { display: flex; flex-direction: column; position: relative; flex-shrink: 0; min-width: 0; }
+.nv-frame { display: grid; }
+.nv-frame > .nv { grid-area: 1 / 1; justify-self: start; align-self: start; }
+.nv-frame > .nv[style*="width: 100%"] { justify-self: stretch; }
+.nv-text, .nv-button, .nv-input, .nv-check { flex-direction: row; align-items: center; gap: 6px; white-space: pre-wrap; }
+.nv-text .nv-txt, .nv-button .nv-txt { flex: 1 1 auto; }
+.nv-button-default { background: #005d8e; color: #fff; border-radius: 22px; padding: 10px 16px; justify-content: center; text-align: center; }
+.nv-input { border-bottom: 1px solid rgba(127,127,127,.4); min-height: 40px; }
+.nv-hint { color: #aaa; }
+.nv-ellipsis .nv-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nv-image { align-items: center; justify-content: center; }
+.nv-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.nv-image-missing { background: repeating-linear-gradient(45deg, rgba(127,127,127,.12) 0 6px, transparent 6px 12px); }
+.nv-compound { width: 20px; height: 20px; object-fit: contain; }
+.nv-compound.end { order: 3; }
+.nv-check { gap: 8px; }
+.nv-check.box, .nv-check.radio { width: 18px; height: 18px; border: 2px solid #999; border-radius: 3px; flex-shrink: 0; }
+.nv-check.radio { border-radius: 50%; }
+.nv-check.on { background: #005d8e; border-color: #005d8e; }
+.nv-check.switch { width: 40px; height: 22px; border-radius: 11px; background: #cfcfcf; order: 3; margin-left: auto; }
+.nv-check.switch.on { background: #005d8e; }
+.nv-list { min-height: 40px; outline: 1px dashed rgba(127,127,127,.45); outline-offset: -1px; }
+.nv-custom { outline: 1px dashed rgba(127,127,127,.45); outline-offset: -1px; min-height: 20px; }
+.nv-label { font: 10px/1.4 Consolas, monospace; color: #888; padding: 1px 4px; background: rgba(127,127,127,.12); align-self: flex-start; }
+.nv-label-corner { position: absolute; top: 0; left: 0; z-index: 1; }
+.nv-progress { display: block; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #005d8e 40%, #ddd 40%); width: 100%; }
+.nv-gone { display: none !important; }
+.show-gone .nv-gone { display: flex !important; outline: 1px dotted #888; opacity: .6; }
+.xml { max-height: 70vh; }
+.rn-svg { flex-shrink: 0; overflow: visible; }

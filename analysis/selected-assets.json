@@ -1,0 +1,30 @@
+[
+  {
+    "FullName": "assets/RN_ANDROID_SEC_ADDDEVICE.zip",
+    "Length": 7413367
+  },
+  {
+    "FullName": "assets/RN_ANDROID_SEC_SETTING.zip",
+    "Length": 33325653
+  },
+  {
+    "FullName": "assets/RN_ANDROID_ZX_T8030.zip",
+    "Length": 14867496
+  },
+  {
+    "FullName": "assets/RN_ANDROID_zx-rnsdk.zip",
+    "Length": 3188802
+  },
+  {
+    "FullName": "assets/json/hb_capability_config.json",
+    "Length": 11909
+  },
+  {
+    "FullName": "assets/module_app.json",
+    "Length": 39119
+  },
+  {
+    "FullName": "assets/p2p-sdk_app_module.json",
+    "Length": 112
+  }
+]

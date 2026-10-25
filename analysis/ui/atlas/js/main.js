@@ -1,0 +1,66 @@
+// Hash router and navigation for the UI atlas.
+import { h, clear, errorBox, loading } from './dom.js';
+import * as data from './data.js';
+import { overviewView } from './views/overview.js';
+import { bundleView } from './views/bundle.js';
+import { screenView } from './views/screen.js';
+import { tokensView } from './views/tokens.js';
+import { nativeListView, nativeLayoutView } from './views/native.js';
+import { assetsView } from './views/assets.js';
+import { initSearch } from './views/search.js';
+
+export const BUNDLE_TITLES = {
+  SEC_SETTING: 'Device settings', SEC_ADDDEVICE: 'Add device / onboarding', MEGA_PLAYER: 'Player and playback',
+  ZX_EVENT: 'Events', ZX_EVENT_TAB: 'Events tab', ZX_AI: 'AI features and modes', ZX_GLOBAL: 'Global (security mode, scan)',
+  ZX_T8030: 'HomeBase 3', ZX_WallLight: 'Wall light', 'zx-rnsdk': 'Shared SDK and UI kit',
+};
+
+const view = document.getElementById('view');
+const nav = document.getElementById('nav');
+
+async function buildNav() {
+  const list = await data.bundles();
+  clear(nav).append(
+    h('a', { href: '#/' }, 'Overview'),
+    h('a', { href: '#/tokens' }, 'Design tokens'),
+    h('a', { href: '#/native' }, 'Native layouts'),
+    h('div', { class: 'nav-head' }, 'React Native bundles'),
+    ...list.map(b => h('a', { href: `#/b/${b.bundle}` }, h('span', {}, BUNDLE_TITLES[b.bundle] || b.bundle), h('small', {}, b.screens + b.modals || b.components))),
+  );
+  markNav();
+}
+
+function markNav() {
+  const hash = location.hash || '#/';
+  for (const a of nav.querySelectorAll('a')) {
+    const href = a.getAttribute('href');
+    a.classList.toggle('active', href === '#/' ? hash === '#/' || hash === '' : hash.startsWith(href));
+  }
+}
+
+async function route() {
+  markNav();
+  const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').map(decodeURIComponent);
+  clear(view).append(loading());
+  try {
+    let node;
+    if (!parts[0]) node = await overviewView();
+    else if (parts[0] === 'tokens') node = await tokensView();
+    else if (parts[0] === 'native' && parts[1]) node = await nativeLayoutView(parts[1]);
+    else if (parts[0] === 'native') node = await nativeListView(parts[1]);
+    else if (parts[0] === 'assets' && parts[1]) node = await assetsView(parts[1]);
+    else if (parts[0] === 'b' && parts[2] !== undefined) node = await screenView(parts[1], Number(parts[2]));
+    else if (parts[0] === 'b' && parts[1]) node = await bundleView(parts[1]);
+    else node = h('p', {}, 'Unknown page.');
+    clear(view).append(node);
+    view.scrollTop = 0;
+  } catch (err) {
+    console.error(err);
+    clear(view).append(errorBox(err));
+  }
+}
+
+window.addEventListener('hashchange', route);
+buildNav().catch(err => nav.append(errorBox(err)));
+initSearch(document.getElementById('search'), document.getElementById('search-results'));
+route();
