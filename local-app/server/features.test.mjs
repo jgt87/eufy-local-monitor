@@ -168,6 +168,20 @@ test('a shared (non-owner) account marks settings read-only', async () => {
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('background client errors: benign endpoints are hidden, camera timeouts are named without a refresh hint', () => {
+  const messages = [];
+  const account = new EufyAccount({ onChange: m => messages.push(m) });
+  account.reportClientError(new Error('/v1/app/review/app_push_check failed (200/-1): Failed to request.'));
+  account.reportClientError(new Error('upload_log failed'));
+  assert.deepEqual(messages, [], 'non-essential cloud endpoints stay out of the activity list');
+  account.reportClientError(new Error('P2P connect timeout for T8400FIXTURE0000 (relay: not started)'));
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /T8400/);
+  assert.doesNotMatch(messages[0], /refresh/i);
+  account.reportClientError(new Error('P2P connect timeout for T8400FIXTURE0000 (relay: not started)'));
+  assert.equal(messages.length, 1, 'a repeat within a minute is dropped');
+});
+
 test('alert, history and settings-write routes', async () => {
   const dir = await tempDir();
   const { createAppServer } = await import('./index.mjs');

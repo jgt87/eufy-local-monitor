@@ -27,9 +27,12 @@ export class EufyAccount {
   async available() { try { await this.loadSdk(); return true; } catch { return false; } }
   // A background SDK error. A P2P connect timeout is usually a camera that is offline or asleep, not an
   // account problem, so name the device by model and do not suggest refreshing the list (which won't help).
-  // Repeats within a minute are dropped so one unreachable camera can't flood the activity list.
+  // Non-essential cloud endpoints (app-store review nags, push/feedback/log reporting) fail harmlessly and
+  // are kept out of the activity list — the full detail is still in the diagnostics log. Repeats within a
+  // minute are dropped so one noisy source can't flood the list.
   reportClientError(e) {
     const raw = typeof e?.message==='string' ? e.message : '';
+    if(/\/(review|feedback)\/|app_push_check|upload_log|event_report|collect_|\/log\//i.test(raw)) return;
     let text;
     if(/P2P connect timeout|StationUnreachable|relay/i.test(raw)) {
       const model = raw.match(/\bT(8[0-9A-Z]{3})/)?.[0];
