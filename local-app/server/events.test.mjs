@@ -63,7 +63,7 @@ test('settings are grouped, labelled and redacted', () => {
       { name: 'dingdongRingtone', enumValues: { 0: 'Default', 7: 'Ding' }, writable: true },
       { name: 'wdrSwitch', writable: true },
     ],
-    getProperties: () => ({ battery: 82, dingdongRingtone: 7, wdrSwitch: true, notificationMode: '{"motion":1,"ring":1}', wifiMac: '10:2C:B1:00:00:00', note: 'unit T8214FIXTURE0000', dskKey: 'abc' }),
+    getProperties: () => ({ battery: 82, dingdongRingtone: 7, wdrSwitch: true, notificationMode: '{"motion":1,"ring":1}', wifiMac: '00:11:22:33:44:55', note: 'unit T8214FIXTURE0000', dskKey: 'abc' }),
   };
   const s = describeSettings(device);
   const rows = Object.fromEntries(s.groups.flatMap(g => g.rows.map(r => [r.name, r])));

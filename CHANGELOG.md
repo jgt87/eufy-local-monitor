@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-26
+
+### Added
+- A personal data check (`tools/check-private.mjs`) for tracked files and the whole commit history: public IP addresses, email addresses, home-folder paths, MAC addresses, device serials, keys and tokens, plus owner-specific strings from a git-ignored `.private-terms.txt`. It runs in CI.
+- Shared (non-owner) eufy accounts: the Settings page is shown read-only, with a note, instead of offering changes the eufy cloud will refuse. Detected from the device owner at sign-in, and confirmed if a change is ever refused.
+- Local-access analysis (`analysis/streaming/LOCAL-ACCESS.md`): why eufy's own stream needs sign-in, and that local RTSP/ONVIF is available through a supported HomeBase (the owner's HomeBase 3 qualifies) with device credentials, no eufy login.
+
+### Changed
+- Live view uses less than a tenth of the bandwidth: the picture is fit to 1280 px on its longest side with even dimensions (so a tall doorbell frame stays within H.264 level 3.1), and the bitrate is capped (CRF 23, 3 Mbit/s ceiling) instead of the old unbounded "ultrafast" encode.
+- Diagnostics logs are far smaller and no longer carry public addresses: repeated low-level P2P lines are collapsed to the first few plus a periodic count, the file stops at a size cap (`EUFY_DIAG_MAX_BYTES`), and public IP addresses and push tokens are masked while LAN addresses are kept. The network watcher masks public IPs too.
+- A background camera connection error (for example a camera that is offline or asleep) names the camera by model and no longer suggests refreshing the device list; repeats within a minute are dropped.
+- `Start Monitor.cmd` and `Start Monitor (diagnostics).cmd` stop with a clear message when another monitor already uses port 4287, instead of quitting with a line that is easy to miss.
+- T8214 live view analysis: outcome of the first working run. The doorbell streams through its HomeBase 3 and sends RSA-wrapped frames, which the SDK decodes by itself, so the ECC key option is not needed for it and stays opt-in (kept as a fallback for key rotation on longer streams).
+- Example values in tests and docs use documentation addresses and a placeholder repository path.
+
 ## [0.3.0] - 2026-10-25
 
 ### Added

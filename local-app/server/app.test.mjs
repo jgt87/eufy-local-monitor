@@ -53,7 +53,7 @@ test('manual captcha and verification flow discovers a camera, then clears accou
  const client=account.client;await account.disconnect();assert.equal(client.disconnected,true);assert.deepEqual(account.devices,[]);
 });
 test('RTSP validation rejects non-media protocols and control characters',()=>{
- assert.equal(validateRtsp('rtsp://user:password@192.168.1.4/live'),'rtsp://user:password@192.168.1.4/live');
+ assert.equal(validateRtsp('rtsp://user:password@192.0.2.4/live'),'rtsp://user:password@192.0.2.4/live');
  for(const value of ['file:///secret','https://example.invalid','rtsp://host/live\n','not a url'])assert.throws(()=>validateRtsp(value));
 });
 async function withServer(options,fn){const server=await createAppServer(options);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;try{await fn(base);}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}

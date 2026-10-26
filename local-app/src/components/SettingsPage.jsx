@@ -52,7 +52,9 @@ export function SettingsPage({ device, connected, api }) {
         </span>
         <button className="icon-button" title="Reload settings" aria-label="Reload settings" disabled={loading} onClick={load}><Icon name="refresh" size={18} /></button>
       </section>
-      <p className="fine-print">Values the device last reported. Settings with a switch or a list can be changed here; change everything else in the eufy app.</p>
+      <p className="fine-print">{data?.ownerGated
+        ? 'Values the device last reported. This eufy account is not the owner of these devices, so settings are read-only here — only the owner can change them, in the eufy app.'
+        : 'Values the device last reported. Settings with a switch or a list can be changed here; change everything else in the eufy app.'}</p>
 
       {history && (
         <section className="panel" aria-label="Battery and signal">
@@ -76,7 +78,7 @@ export function SettingsPage({ device, connected, api }) {
               <div key={r.name} className="setting-row">
                 <div className="cell static">
                   <span className="cell-copy"><strong>{r.label}</strong>{result?.name === r.name && <small role="status" className={result.error ? 'error-text' : undefined}>{result.text}</small>}</span>
-                  {r.control?.type === 'switch' ? (
+                  {data.ownerGated || !r.control ? <span className="cell-value">{r.value}</span> : r.control.type === 'switch' ? (
                     <Switch label={r.label} checked={pending?.row.name === r.name ? pending.value : r.raw} disabled={writing} onChange={value => { setResult(null); setPending({ row: r, value }); }} />
                   ) : r.control?.type === 'select' ? (
                     <select className="cell-select" aria-label={r.label} value={pending?.row.name === r.name ? pending.value : r.raw} disabled={writing}

@@ -77,7 +77,7 @@ node analysis/ui/atlas/serve.mjs 4291
 Tests use the Playwright copy in `local-app/node_modules` with installed Edge:
 
 ```
-set PLAYWRIGHT_MODULE_URL=file:///C:/Files/Apps/EufySecurity/local-app/node_modules/playwright/index.mjs
+set PLAYWRIGHT_MODULE_URL=file:///<repo>/local-app/node_modules/playwright/index.mjs
 node analysis/ui/atlas/test/smoke.mjs
 node analysis/ui/atlas/test/shots.mjs <out-dir> "#/b/SEC_SETTING/190" "#/tokens" "#/map" "#/t8214"
 ```

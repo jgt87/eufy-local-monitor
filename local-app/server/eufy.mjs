@@ -1,5 +1,6 @@
 import { EVENT_LABELS, deviceKey } from './events.mjs';
 import { describeSettings } from './settings.mjs';
+import { redactString } from './diagnostics.mjs';
 
 export function accountFailure(error,stage='sign-in') {
   const message=typeof error?.message==='string'?error.message:'';
@@ -21,9 +22,26 @@ export class EufyAccount {
   constructor({loadSdk = () => import('@mega-yfue/eufy-sdk'), onChange = () => {}, diag = {log() {}}, events = null, alerts = null, history = null, saved = null, thumbnailDelayMs = 4000, sampleMs = 900000} = {}) {
     this.loadSdk = loadSdk; this.onChange = onChange; this.diag = diag; this.events = events; this.alerts = alerts; this.history = history; this.saved = saved; this.thumbnailDelayMs = thumbnailDelayMs; this.sampleMs = sampleMs;
     this.status = 'signed-out'; this.devices = []; this.client = null; this.busy = false; this.challenge = null; this.remember = false; this.values = new Map(); this.sampler = null;
+    this.ownerGated = false; this.userId = null; this.lastErrorAt = 0; this.lastErrorText = '';
   }
   async available() { try { await this.loadSdk(); return true; } catch { return false; } }
-  snapshot() { return {status:this.status, devices:this.devices, challenge:this.challenge, remembered:this.remember && this.status==='connected'}; }
+  // A background SDK error. A P2P connect timeout is usually a camera that is offline or asleep, not an
+  // account problem, so name the device by model and do not suggest refreshing the list (which won't help).
+  // Repeats within a minute are dropped so one unreachable camera can't flood the activity list.
+  reportClientError(e) {
+    const raw = typeof e?.message==='string' ? e.message : '';
+    let text;
+    if(/P2P connect timeout|StationUnreachable|relay/i.test(raw)) {
+      const model = raw.match(/\bT(8[0-9A-Z]{3})/)?.[0];
+      text = `A camera could not be reached${model?` (${model})`:''}. It may be offline or asleep.`;
+    } else {
+      text = `Eufy reported a connection error: ${redactString(raw).slice(0,120) || 'unknown'}.`;
+    }
+    const now = Date.now();
+    if(text===this.lastErrorText && now-this.lastErrorAt < 60000) return;
+    this.lastErrorText=text; this.lastErrorAt=now; this.onChange(text);
+  }
+  snapshot() { return {status:this.status, devices:this.devices, challenge:this.challenge, remembered:this.remember && this.status==='connected', ownerGated:this.ownerGated}; }
   // Restore a saved session at startup without a password. Returns false when there is nothing usable,
   // so no sign-in with an empty password is ever sent.
   async resume() {
@@ -48,9 +66,10 @@ export class EufyAccount {
       if(this.saved && !resuming) this.saved.forget();
       const stores=this.remember?{store:this.saved.session,pushStore:this.saved.push}:{};
       this.client=new sdk.EufyMega({email,password,countryCode,...stores,...(this.diag.logger?{logger:this.diag.logger}:{})});
-      this.client.on('error', e => {this.diag.log('sdk:event','client error',e);this.onChange('Eufy reported a connection error. Try refreshing the device list.');});
+      this.client.on('error', e => {this.diag.log('sdk:event','client error',e);this.reportClientError(e);});
       this.client.on('event', e => void this.record(e).catch(err => this.diag.log('events','record failed',err)));
       this.client.on('sessionExpired', () => {this.status='expired';this.onChange('Session expired. Sign out and sign in again.');});
+      this.diag.log('account','sign-in requested',{remember:this.remember,resuming});
       this.status='signing-in'; this.onChange(resuming?'Restoring the saved sign-in.':'Signing in to Eufy.');
       const result=await this.client.login();
       if(resuming && result.status!==sdk.LoginStatus.Ok) throw new Error('The saved sign-in needs a new password or verification.');
@@ -91,7 +110,13 @@ export class EufyAccount {
   }
   async refresh() {
     if(!this.client || this.status!=='connected') throw new Error('Sign in to load your devices.');
+    try { this.userId=this.client.auth?.userId ?? this.userId; } catch { /* auth not exposed */ }
     const records=await this.client.getDevices();
+    // Shared (member) accounts cannot change per-device settings; eufy refuses with code 20004. Detect it
+    // up front when the device records name an owner other than this account, so the page starts read-only.
+    try {
+      if(this.userId && records.some(r=>{const a=r?.raw?.member?.admin_user_id;return typeof a==='string' && a && a!==this.userId;})) this.ownerGated=true;
+    } catch { /* member field absent; fall back to the first refused write */ }
     this.devices=await Promise.all(records.map(async r=>{
       const d=await this.client.getDevice(r.sn); const cam=d.camera?.();
       const info={sn:r.sn,key:deviceKey(r.sn),name:r.name || r.sn,model:String(r.model || r.productCode || r.product_code || ''),codec:d.codec || '',capabilities:Array.isArray(d.capabilities)?d.capabilities:[],canLive:typeof cam?.openReadable==='function',stationSn:r.stationSn && r.stationSn!==r.sn?r.stationSn:null};
@@ -124,7 +149,8 @@ export class EufyAccount {
     if(!ok) throw new Error('Choose one of the offered values.');
     const device=this.devices.find(d=>d.sn===sn);
     this.diag.log('settings','write',{model:device.model,name,value});
-    await this.client.setProperty(sn,name,value);
+    try { await this.client.setProperty(sn,name,value); }
+    catch(e){ if(/only the owner|20004/i.test(String(e?.message))){ this.ownerGated=true; throw new Error('Only the owner of this device can change its settings.'); } throw e; }
     const shown=row.control.type==='switch'?(value?'On':'Off'):row.control.options.find(([v])=>v===value)[1];
     this.onChange(`${row.label} set to ${shown} on ${device.name}.`);
     return {name,value,label:row.label,shown};
@@ -146,6 +172,7 @@ export class EufyAccount {
   // first keyframe unless the budget is raised; the page allows five minutes. With EUFY_LIVE_ECC=1 it also
   // looks up the ECC private key of the cipher the P2P session negotiated, so the SDK can decode E2E frames
   // (ECIES envelope + AES-GCM), which it otherwise drops. The key only reaches the SDK's fallback decoder.
+  // The T8214 (behind a HomeBase 3) and a T8400 send RSA-wrapped frames (signCode 1) and do not need it.
   // This reads SDK internals (p2p router, session cipher id) and degrades to the plain options when absent.
   async liveOptions(sn) {
     const opts={batteryBudgetMs:5*60*1000};
@@ -193,7 +220,8 @@ export class EufyAccount {
   async settings(sn) {
     if(this.status!=='connected' || !this.devices.some(d=>d.sn===sn)) throw new Error('Select a device on this account.');
     const result=describeSettings(await this.client.getDevice(sn));
-    this.diag.log('settings','read',{model:this.devices.find(d=>d.sn===sn)?.model,reported:result.reported,capabilities:result.capabilities});
+    result.ownerGated=this.ownerGated;
+    this.diag.log('settings','read',{model:this.devices.find(d=>d.sn===sn)?.model,reported:result.reported,capabilities:result.capabilities,ownerGated:this.ownerGated});
     return result;
   }
   // forget: the user signed out, so the saved sign-in goes too. A shutdown keeps it.

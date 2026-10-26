@@ -15,17 +15,18 @@ const xorWrap = { protect: b => Buffer.from(b.map(x => x ^ 0x5a)), unprotect: b 
 const SN = 'T8214FIXTURE0000';
 
 // A stand-in SDK: records the options each client was built with and answers a restored login.
-function fakeSdk({ valid = true, status = 'ok' } = {}) {
+function fakeSdk({ valid = true, status = 'ok', ownerGated = false } = {}) {
   const built = [];
   class EufyMega {
     constructor(opts) { this.opts = opts; built.push(opts); this.writes = []; }
     on() { return this; }
+    get auth() { return { userId: 'me' }; }
     async login() { return { status }; }
-    async getDevices() { return [{ sn: SN, name: 'Front door', model: 'T8214' }]; }
+    async getDevices() { return [{ sn: SN, name: 'Front door', model: 'T8214', raw: { member: { admin_user_id: ownerGated ? 'someone-else' : 'me' } } }]; }
     async getDevice() {
       return { camera: () => ({}), getProperties: () => ({ battery: 81, wifiRssi: -61, chimeSwitch: true }), properties: [{ name: 'chimeSwitch', writable: true }, { name: 'battery', writable: false }] };
     }
-    async setProperty(sn, name, value) { this.writes.push([sn, name, value]); }
+    async setProperty(sn, name, value) { if (ownerGated) throw new Error('error 20004: Only the owner can change settings.'); this.writes.push([sn, name, value]); }
     async disconnect() {}
   }
   return { built, sdk: { EufyMega, LoginStatus: { Ok: 'ok', Captcha: 'captcha', TwoFactor: '2fa' }, isSessionValid: () => valid } };
@@ -149,6 +150,21 @@ test('settings writes are limited to offered switches and choices', async () => 
     assert.ok(messages.includes('Chime switch set to Off on Front door.'));
     await account.disconnect();
     assert.equal(account.sampler, null);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a shared (non-owner) account marks settings read-only', async () => {
+  const dir = await tempDir();
+  try {
+    const { sdk } = fakeSdk({ ownerGated: true });
+    const account = new EufyAccount({ loadSdk: async () => sdk, events: new EventLog(dir) });
+    await account.login({ email: 'member@example.com', password: 'pw', countryCode: 'NL' });
+    assert.equal(account.ownerGated, true, 'detected from the device owner at discovery');
+    assert.equal(account.snapshot().ownerGated, true);
+    assert.equal((await account.settings(SN)).ownerGated, true);
+    await assert.rejects(() => account.setSetting(SN, 'chimeSwitch', false), /only the owner/i);
+    assert.deepEqual(account.client.writes, [], 'nothing was written');
+    await account.disconnect();
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

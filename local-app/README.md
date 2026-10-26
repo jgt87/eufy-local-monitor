@@ -53,7 +53,7 @@ To use installed Edge instead, set `$env:PLAYWRIGHT_CHANNEL='msedge'` before run
 
 - `diagnostics-*.log` (JSON lines): the SDK's debug and live-start trace (cloud, P2P lookup, key exchange, media start and keepalive), the real errors behind "could not open a live stream" and "media connection ended", FFmpeg stderr for camera streams, and the first video bytes, which show H.264 or H.265. Serials keep only their model prefix. MAC addresses, emails, account IDs, tokens and key material are redacted. RTSP streams never record FFmpeg output.
 - `netwatch-*.log`: each TCP connection and UDP port the monitor process opens or closes, with names from the local DNS cache. No admin rights are needed.
-- `EUFY_LIVE_ECC=1` hands the SDK the session's ECC key when live view opens, so end-to-end encrypted frames can be decoded. The log line `ecc lookup` shows whether a key was found. Live view also asks the SDK for a five-minute battery budget instead of its 45 s default. Background and the ranked failure causes are in `../analysis/streaming/T8214-LIVE.md`.
+- `EUFY_LIVE_ECC=1` hands the SDK the session's ECC key when live view opens, for cameras that send end-to-end (ECIES) frames. The log line `ecc lookup` shows whether a key was found. The T8214 does not need it: its frames are RSA-wrapped, which the SDK decodes by itself. Live view also asks the SDK for a five-minute battery budget instead of its 45 s default. Background and the ranked failure causes are in `../analysis/streaming/T8214-LIVE.md`.
 - Optional: `tools/capture.ps1` in an administrator PowerShell records UDP and TCP/443 with the built-in `pktmon` and saves a `.pcapng`.
 
 ## Look

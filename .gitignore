@@ -36,3 +36,6 @@ local-app/test/screenshots/debug.png
 
 # Local-only agent pointer (the repo must not name AI assistants)
 CLAUDE.md
+
+# Owner-specific strings for tools/check-private.mjs (full serial, MAC, username, public IP)
+.private-terms.txt

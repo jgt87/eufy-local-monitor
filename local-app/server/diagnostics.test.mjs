@@ -19,6 +19,25 @@ test('secret-looking fields and key material are redacted', () => {
   assert.equal(out.blob, '<hex>');
 });
 
+test('public IPs are masked, LAN addresses are kept', () => {
+  const s = redactString('lan 192.168.1.17:29309 and 10.0.0.5 and 172.16.4.4 reach cloud 198.51.100.7:32100 and 203.0.113.9');
+  assert.match(s, /192\.168\.1\.17/);
+  assert.match(s, /10\.0\.0\.5/);
+  assert.match(s, /172\.16\.4\.4/);
+  assert.doesNotMatch(s, /198\.51\.100\.7|203\.0\.113\.9/);
+  assert.match(s, /<ip>/);
+});
+
+test('a version string is not mistaken for a public IP', () => {
+  assert.match(redactString('app 6.1.10 build'), /6\.1\.10/);
+});
+
+test('a push registration token is redacted', () => {
+  const s = redactString('[fcm] registered token cjJ2QeH-qHsTc_QGpBu13d:APA91bHh' + 'x'.repeat(60));
+  assert.doesNotMatch(s, /APA91/);
+  assert.match(s, /<token>/);
+});
+
 test('video start detection reads the first NAL header', () => {
   const h264 = describeVideoStart(Buffer.from([0, 0, 0, 1, 0x67, 0x42]));
   assert.equal(h264.annexB, true);

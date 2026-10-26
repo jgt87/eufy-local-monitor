@@ -17,6 +17,8 @@ jobs:
         working-directory: local-app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24.5'
@@ -56,3 +58,6 @@ jobs:
             echo "Vendor material is tracked; remove it from git." >&2
             exit 1
           fi
+      - name: No personal data tracked
+        working-directory: .
+        run: node tools/check-private.mjs && node tools/check-private.mjs --history

@@ -41,7 +41,10 @@ export class MediaSession {
       if(this.kind==='test')args.push('-re','-f','lavfi','-i','testsrc2=size=960x540:rate=15');
       else if(this.kind==='rtsp')args.push('-rtsp_transport','tcp','-rw_timeout','15000000','-i',validateRtsp(this.rtspUrl));
       else {this.input=await this.openVideo(this.sn);if(this.closed){this.input.destroy();return;}args.push('-probesize','1000000','-analyzeduration','1000000','-i','pipe:0');}
-      args.push('-map','0:v:0','-an','-vf','scale=w=min(1280\\,iw):h=-2','-r','15','-c:v','libx264','-preset','ultrafast','-tune','zerolatency','-profile:v','baseline','-level:v','3.1','-pix_fmt','yuv420p','-g','15','-keyint_min','15','-sc_threshold','0','-movflags','frag_keyframe+empty_moov+default_base_moof','-frag_duration','500000','-f','mp4','pipe:1');
+      // Fit the longest side to 1280 (so a tall doorbell frame stays within H.264 level 3.1) with even
+      // dimensions, and cap the bitrate: 'ultrafast' with no rate control inflated the camera's ~2 Mbit/s
+      // feed into ~12 Mbit/s of MP4. veryfast + CRF 23 + a 3 Mbit/s ceiling keeps CPU low and output small.
+      args.push('-map','0:v:0','-an','-vf',"scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",'-r','15','-c:v','libx264','-preset','veryfast','-tune','zerolatency','-profile:v','baseline','-level:v','3.1','-pix_fmt','yuv420p','-crf','23','-maxrate','3M','-bufsize','6M','-g','15','-keyint_min','15','-sc_threshold','0','-movflags','frag_keyframe+empty_moov+default_base_moof','-frag_duration','500000','-f','mp4','pipe:1');
       this.child=spawn(ffmpegPath,args,{windowsHide:true,stdio:['pipe','pipe','pipe']});
       this.child.stdin.on('error',()=>{});
       // FFmpeg errors can contain RTSP credentials: never retain stderr for RTSP. Camera pipes carry none, so diagnostics keep it.

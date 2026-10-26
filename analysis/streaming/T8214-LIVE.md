@@ -2,6 +2,22 @@
 
 Goal: have a fix ready to try once diagnostics and netwatch logs from the owner's T8214 (Video Doorbell Dual, battery) arrive. Everything here is static: the eufy app 6.1.10 (30612) bundles and native-library strings, and the source of `@mega-yfue/eufy-sdk` 0.5.0 in `local-app/node_modules`. Nothing was run against a device. Statements about the app paraphrase its logic and quote only identifiers and command numbers.
 
+## Outcome (2026-10-26)
+
+Live view plays. One diagnostics run, with the ECC lookup on:
+- **Topology:** the T8214 is on a HomeBase 3 (T8030). The `device` line shows `homeBase:true`, `parentDiffers:true`, channel 0, and the trace shows `station-resolved {topology:"attached", stationModel:"T8030"}`. The SDK sends the attached start (1350 wrapping 1003) at level 2 (`level2-ready`, cipher 21; the HomeBase session was already open from sign-in). The start was sent twice, 2 s apart (the warm-up resend), with no `media-command-ack`. The first frame came right after the second one.
+- **Frames:** `first-video-command {signCode:1, accepted:true}`, then `first-video-unit`, `first-keyframe` (1600x2200 H.264, `powered=battery`) and `first camera bytes` (Annex B, NAL type 7). There is no `video-decode-empty`. Sign code 1 is the RSA-wrapped AES form (the app's "RSA V3"), which `P2PSession.decodeVideoFrame` decodes with the session's own RSA key. The ECIES decoder that `eccPrivateKey` feeds is only a fallback after that path and the plaintext path return nothing, and a failed fallback would have logged `video-decode-empty`.
+- **Not seen:** `start-failed`, `session-unreachable`, `media-command-unacknowledged`, `level2-unavailable` for this station. The stream ran about 2 minutes until it was stopped by hand, so the five-minute budget was not reached.
+
+Verdict per cause:
+- **A (E2E without a key): very likely rejected.** The frames were not E2E V5. The key was looked up (`ecc lookup {cipherId:21, found:true}`) but was very probably never used. The ECC fallback stays in place anyway (opt-in, `EUFY_LIVE_ECC=1`): the run was only ~2 minutes and never re-keyed, and a longer session could rotate the session key or switch to E2E frames mid-stream, where the fallback would be needed. Removing it would risk a stream that starts fine and then stalls.
+- **B (wrong topology): rejected.** "Attached" is correct for this doorbell.
+- **C, D: not seen.** E: not reached (fixed in advance). F: H.264, so no HEVC probing issue.
+- The earlier failure was never logged, so its cause is unknown. Candidates are the local 45 s timer with a slow wake (C) or a HomeBase session that was not up yet. If it comes back, the diagnostics launcher will show which.
+- 1600x2200 is taller than the main lens alone. It is probably both lenses (main and package camera) in one picture. The SDK has no lens or layout control (6202 / 6243).
+
+A T8400 (wired, own session, cipher 211, `level2-unavailable derivation-failed`) played in the same run at level 1, also with sign code 1 and no ECC key (`found:false`).
+
 ## 1. What the app shows about a T8214 live start
 
 ### Where the logic lives
@@ -52,7 +68,7 @@ Chain: `camera().openReadable(opts)` → `MediaProvider.openReadable({powered, .
 | Own-session start | 1700 wrapping `{commandType:1000, data:{cmd:1000, account_id, accountId, mValueStrSub, mChannel, mValue3:0, mValue5:0, msg_id:1, camera_type:0, entrytype:0, extValue:1000, ivalue:1, restore:0, streamtype:2, video_type:12, timestamp, transaction, encryptkey:<RSA-1024 modulus>}}`. Level 2 (GCM, signCode 8, frame type 10) once a key exists, level 1 (AES-ECB, signCode 1, frame type 11) before that, or in the clear (signCode 0, short body) when the gateway cipher id is 0. | IDs match. The field set is "byte-verified" in SDK comments against *some* own-session camera, not the T8214. `camera_type:0` picks one lens of the dual doorbell. |
 | Retries | Start resent every 150 ms until acknowledged, for up to 3 s (`media-command-unacknowledged`). Warm-up resends every 2 s, deadline **20 s** (`warmTimeoutMs`). Keepalive 1139 every 3 s. | App timings unknown |
 | Connect | Own PPCS-compatible UDP client: LAN broadcast to port 32108, cloud lookup with `get_dsk_keys` DSK and `p2p_conn`/`app_conn` servers, relay fallback. Connect timeout 45 s. | Same three modes as the app's 0x3F |
-| Media decrypt | `session.decodeVideoFrame`: RSA-wrapped AES key in bytes 22–150, first 128 body bytes AES-ECB (the app's "RSA V3"), or plaintext. **E2E frames (ECIES envelope at 22, GCM tag at 151, nonce at 167, body at 179; the app's "E2E V5") decode only when `eccPrivateKey` is passed.** Otherwise the SDK drops them and logs `video-decode-empty`. | The app handles V2, V3, V5, V8 and plaintext. **`local-app` passes no `eccPrivateKey`.** |
+| Media decrypt | `session.decodeVideoFrame`: RSA-wrapped AES key in bytes 22–150, first 128 body bytes AES-ECB (the app's "RSA V3"), or plaintext. **E2E frames (ECIES envelope at 22, GCM tag at 151, nonce at 167, body at 179; the app's "E2E V5") decode only when `eccPrivateKey` is passed.** Otherwise the SDK drops them and logs `video-decode-empty`. | The app handles V2, V3, V5, V8 and plaintext. `local-app` passes `eccPrivateKey` only with `EUFY_LIVE_ECC=1`; the T8214 did not need it (see Outcome). |
 | Codec | Sniffs H.264 or H.265 from the keyframe and defaults to `h264`. The readable carries raw Annex-B with no container. | The app handles both |
 | Battery | `powered:"battery"` (T8214 has the `battery` capability). The pull is **auto-stopped 45 s + 10 s after the first keyframe** unless `extend()` is called. `openReadableFromConsumer` does not forward the budget notice. | `local-app` expects up to 5 minutes |
 | Dual lens | No 6202 / 6243 handling in the live path. An own-session stream does not filter frames by channel. | The app can switch the lens or layout |
@@ -91,9 +107,9 @@ Diagnostics lines are JSON with `source` `sdk:debug` (`"message":"[live] start t
 - Confirm: `first camera bytes` with `annexB:true` and `h265NalType:32` (VPS), and `ffmpeg` stderr such as "Invalid data found when processing input", "Could not find codec parameters", "PPS id out of range" or a resolution change. The SDK line `first keyframe — live (WxH hevc …)` shows the size and codec. Two different WxH values point at dual-lens interleaving.
 - Fix: pass `-f hevc` or `-f h264` from the first chunk's NAL type (small change in `media.mjs`). For dual lens, see 6243 / 2700 view mode. Not in the diff.
 
-## 4. Proposed patch (not applied)
+## 4. Patch (applied in 0.3.0)
 
-The diff is kept outside the repository, in the session scratchpad, as `t8214-live-options.diff`. It applies cleanly with `git apply --check` from the repo root. It touches only `local-app/server/*`; nothing in `node_modules` changes.
+It touches only `local-app/server/*`; nothing in `node_modules` changes.
 
 1. `eufy.mjs`: `openVideo` passes `await this.liveOptions(sn)` to `openReadable`:
    - It always sets `batteryBudgetMs: 300000` (cause E).
@@ -106,5 +122,6 @@ The diff is kept outside the repository, in the session scratchpad, as `t8214-li
 
 ## 5. Open points
 
-- The exact Java-built start body for the T8214 (lens selection, `video_type`, codec request) cannot be recovered statically, because the Java layer is protected. A capture or the diagnostics log is the next source.
-- Whether the owner's T8214 is standalone, on a HomeBase 3, or edge-connected decides between causes B and C.
+- The exact Java-built start body for the T8214 (lens selection, `video_type`, codec request) cannot be recovered statically, because the Java layer is protected. It matters only for choosing a lens or layout; the default start works.
+- Answered: the owner's T8214 is on a HomeBase 3 and streams through it.
+- Not yet run: a doorbell live view with `EUFY_LIVE_ECC=0`, to confirm the key is not needed, and a stream past five minutes.
