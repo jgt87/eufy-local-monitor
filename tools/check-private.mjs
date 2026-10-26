@@ -25,9 +25,10 @@ const NOT_IPS = new Set(['analysis/streaming/BytecodeList.def:18.2.1.1', 'analys
 // allowed in history only, so rewriting published tags is not needed for them.
 const HISTORY_ONLY = new Set(['local-app/server/app.test.mjs:192.168.1.4', 'local-app/server/events.test.mjs:10:2C:B1:00:00:00']);
 const history = process.argv.includes('--history');
+const SELF = 'tools/check-private.mjs'; // the scanner holds example patterns and allow-listed literals; don't scan it
 
 const RULES = [
-  { name: 'IP address', re: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, ok: (m, file) => SAFE_IP.test(m) || NOT_IPS.has(`${file}:${m}`) },
+  { name: 'IP address', re: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, ok: (m, file) => SAFE_IP.test(m) || /\.0\.0\.0$/.test(m) || NOT_IPS.has(`${file}:${m}`) },
   { name: 'email address', re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, ok: m => SAFE_EMAIL.test(m) },
   { name: 'home folder path', re: /\b[A-Za-z]:[\\/]{1,2}(?:Users|Documents and Settings)[\\/]{1,2}[^\\/\s'"`]+|\/(?:home|Users)\/[A-Za-z0-9._-]+/g, ok: m => /[\\/](?:Users|home)[\\/]+(?:<|\$|%|\{|runner\b|me\b)/.test(m) },
   { name: 'MAC address', re: /\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/g, ok: m => SAFE_MAC.test(m) },
@@ -65,11 +66,11 @@ if (history) {
     if (line.startsWith('commit ')) { commit = line.slice(7, 14); where = 'commit message'; }
     else if (line.startsWith('+++ b/')) where = line.slice(6);
     else if (line.startsWith('-') || line.startsWith('@@') || line.startsWith('diff ') || line.startsWith('index ')) continue;
-    else scan(where, line.replace(/^\+/, ''), () => ` (commit ${commit})`);
+    else if (where !== SELF) scan(where, line.replace(/^\+/, ''), () => ` (commit ${commit})`);
   }
 } else {
   for (const file of git('ls-files', '-z').split('\0').filter(Boolean)) {
-    if (!existsSync(path.join(root, file))) continue;
+    if (file === SELF || !existsSync(path.join(root, file))) continue;
     scan(file, readFileSync(path.join(root, file), 'utf8'));
   }
 }
