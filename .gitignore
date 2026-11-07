@@ -1,6 +1,8 @@
-# Vendor material: the APKs and everything extracted or decompiled from them stay local.
+# Vendor material: the APKs/IPA and everything extracted or decompiled from them stay local.
 # Rebuild locally from your own copy of the APK (see analysis/ui/README.md).
 APKDownload/
+IPADownload/
+analysis/ios/
 analysis/decoded/
 analysis/decompiled/
 analysis/asset-evidence/
@@ -39,3 +41,11 @@ CLAUDE.md
 
 # Owner-specific strings for tools/check-private.mjs (full serial, MAC, username, public IP)
 .private-terms.txt
+
+# iOS app rebuild/modification tooling stays local (parallels the git-ignored analysis/ios effort)
+analysis/ui/tools/build-ios.mjs
+analysis/ui/tools/map-ios-assets.mjs
+analysis/ui/tools/patch-poc.mjs
+analysis/ui/tools/build-debloat.py
+.repowise/
+.claude/
